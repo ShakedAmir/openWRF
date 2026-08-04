@@ -614,22 +614,30 @@ function initForecast() {
   const $ = (id) => document.getElementById(id);
 
   function analyze(rows, cols) {
-    // עמודות לפי מיקום: 0=Date/Time, 1=Wind, 2=Dir, 3=Gusts
-    const gcol = cols[3] || cols[1];
-    const dcol = cols[2];
-    let maxG = -Infinity, maxAt = "", dirAtMax = null;
-    let run = 0, bestRun = 0;                       // חלון רוח = רצף הכי ארוך מעל הסף
-    const stepH = 0.5;                              // כל רשומה = חצי שעה (0800,0830...)
-    rows.forEach(r => {
-      const g = parseFloat(r[gcol]);
-      if (!isNaN(g)) {
-        if (g > maxG) { maxG = g; maxAt = r[cols[0]]; dirAtMax = dcol ? parseFloat(r[dcol]) : null; }
-        if (g >= WINDOW_KTS) { run += stepH; if (run > bestRun) bestRun = run; }
-        else run = 0;
-      }
-    });
-    return { gust: isFinite(maxG) ? maxG : null, window: bestRun, dir: dirAtMax };
-  }
+	  const gcol = cols[3] || cols[1];
+	  const dcol = cols[2];
+	  let maxG = -Infinity, maxAt = "", dirAtMax = null;
+	  let run = 0, bestRun = 0, startAt = null, bestStart = null;
+	  const stepH = 0.5;
+
+	  rows.forEach(r => {
+		const g = parseFloat(r[gcol]);
+		if (!isNaN(g)) {
+		  if (g > maxG) { maxG = g; at = r[cols[0]]; dirAtMax = dcol ? parseFloat(r[dcol]) : null; }
+		  if (g >= WINDOW_KTS) {
+			if (run === 0) startAt = r[cols[0]]; // תחילת רצף חדש
+			run += stepH;
+			if (run > bestRun) { bestRun = run; bestStart = startAt; }
+		  } else {
+			run = 0;
+			startAt = null;
+		  }
+		}
+	  });
+
+	  return { gust: isFinite(maxG) ? maxG : null, window: bestRun, dir: dirAtMax, start: bestStart };
+	}
+
 
   function load(fname) {
 	  return new Promise((res) => {
@@ -663,26 +671,29 @@ function initForecast() {
 
 
   function render(results) {
-    $("fc-grid").innerHTML = SPOTS.map((s, i) => {
-      const d = results[i];
-      const g = d && d.gust != null ? Math.round(d.gust) : null;
-      const win = d ? d.window : 0;
-      const dir = d && d.dir != null && !isNaN(d.dir) ? d.dir : null;
-      const arrow = dir != null
-        ? '<div class="fc-arrow" style="transform:rotate('+((dir+180)%360)+'deg)">↑</div>'
-          + '<div class="fc-dir">'+Math.round(dir)+'° '+compass(dir)+'</div>'
-        : '<div class="fc-arrow fc-na">–</div>';
-      return '<div class="fc-col">' +
-        '<div class="fc-spot">'+s.name+'</div>' +
-        '<div class="fc-sq" style="background:'+colorFor(g)+'"></div>' +
-        '<div class="fc-gust'+(g==null?' fc-na':'')+'">'+(g!=null?g:'–')+'</div>' +
-        '<div class="fc-label">שיא גאסט (קשר)</div>' +
-        arrow +
-        '<div class="fc-win">חלון: <b>'+(win>0?win:'0')+'</b> ש׳</div>' +
-        '<div class="fc-label">מעל '+WINDOW_KTS+' קשר</div>' +
-      '</div>';
-    }).join("");
-  }
+	  $("fc-grid").innerHTML = SPOTS.map((s, i) => {
+		const d = results[i];
+		const g = d && d.gust != null ? Math.round(d.gust) : null;
+		const win = d ? d.window : 0;
+		const dir = d && d.dir != null && !isNaN(d.dir) ? d.dir : null;
+		const start = d && d.start ? d.start.split("-")[1].replace(/(\d{2})(\d{2})/, "$1:$2"): null;// רק השעה (HHMM)
+		const arrow = dir != null
+		  ? '<div class="fc-arrow" style="transform:rotate('+((dir+180)%360)+'deg)">↑</div>'
+			+ '<div class="fc-dir">'+Math.round(dir)+'° '+compass(dir)+'</div>'
+		  : '<div class="fc-arrow fc-na">–</div>';
+		return '<div class="fc-col">' +
+		  '<div class="fc-spot">'+s.name+'</div>' +
+		  '<div class="fc-sq" style="background:'+colorFor(g)+'"></div>' +
+		  '<div class="fc-gust'+(g==null?' fc-na':'')+'">'+(g!=null?g:'–')+'</div>' +
+		  '<div class="fc-label">שיא גאסט (קשר)</div>' +
+		  arrow +
+		  '<div class="fc-win">חלון: <b>'+(win>0?win:'0')+'</b> ש׳</div>' +
+		  '<div class="fc-label">מעל '+WINDOW_KTS+' קשר</div>' +
+		  (start ? '<div class="fc-label">משעה: '+start+'</div>' : '') +
+		'</div>';
+	  }).join("");
+	}
+
 
   function run() {
     $("fc-foot").textContent = "טוען…";
