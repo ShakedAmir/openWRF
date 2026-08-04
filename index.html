@@ -337,7 +337,7 @@ function initGo() {
     gustFile:   "18z_1km_Kineret_Diamond.csv",
     gustMinKts: 20,
     tempDiffMin: 4,
-    // טבלת רונן זוהר: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
+    // טבלת  : הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
     ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
   };
   // ======================================================================
@@ -393,7 +393,7 @@ function initGo() {
       .catch(() => null);
   }
 
-  // התאמת פרבולה (least-squares) לטבלת רונן זוהר -> אחוז סיכוי לפי הפרש
+  // התאמת פרבולה (least-squares) לטבלת   -> אחוז סיכוי לפי הפרש
   const QUAD = fitQuad(CFG.ronen);
   function fitQuad(pts) {
     let n = pts.length, Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
@@ -463,8 +463,8 @@ function initGo() {
 
       // --- תנאי 4: מקום שמור ---
       const c4 = (diff != null)
-        ? { state:"pass", title:"ניתוח סטטיסטי (רונן זוהר)", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
-        : { state:"unk", title:"ניתוח סטטיסטי (רונן זוהר)", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
+        ? { state:"pass", title:"ניתוח סטטיסטי ( )", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
+        : { state:"unk", title:"ניתוח סטטיסטי ( )", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
       // ציור השורות
       const rows = [c1, c2, c3, c4];
@@ -484,7 +484,7 @@ function initGo() {
         setLight("is-no", "לא ניתן לקבוע", "חלק מהנתונים לא נטענו");
       } else if (goodAll) {
         setLight("is-go", "סע לגלוש 🏄",
-          prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "% · רונן זוהר") : "כל התנאים מתקיימים");
+          prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "% ·  ") : "כל התנאים מתקיימים");
       } else {
         const missing = [];
         if (c1.state !== "pass") missing.push("רוח");
