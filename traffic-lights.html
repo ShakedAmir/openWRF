@@ -39,7 +39,9 @@
   #go.is-no .go-light{background:var(--red-soft)}
   #go.is-no .go-lamp{background:var(--red);box-shadow:0 0 0 6px rgba(209,59,59,.16),0 6px 18px rgba(209,59,59,.3)}
   #go.is-no .go-label{color:var(--red)}
-  #go.is-wait .go-lamp{background:#cbd5e1}
+  #go.is-wait .go-light{background:var(--chk-soft)}
+  #go.is-wait .go-lamp{background:var(--amber);box-shadow:0 0 0 6px rgba(224,138,30,.16)}
+  #go.is-wait .go-label{color:var(--amber)}
 
   #go .go-checks{border-top:1px solid var(--line)}
   #go .go-check{display:flex;align-items:flex-start;gap:10px;padding:11px 18px;
@@ -66,7 +68,7 @@
 <script>
 (function () {
   // ===== CONFIG =========================================================
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw6tKaESa-vQd7AkdbjyKoYvmmTTsNzG_dYecXUhv7f6hOpANldJR1sQ4zZdZ5Am_R94A/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw1DsUsKIvb0WGwWaBHl3dksX6WrbXydUqYoIQkG1PFdTyNCUWusOavzegJse_aEM0/exec";
 
   const CFG = {
     med:        { lat: 32.40, lon: 34.25 },   // נקודה בים התיכון (כמו Windy של KDI)
@@ -74,7 +76,7 @@
     gustFile:   "18z_1km_Kineret_Diamond.csv",
     gustMinKts: 20,
     tempDiffMin: 4,
-    // טבלת רונן זוהר: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
+    // טבלת  : הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
     ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
   };
   // ======================================================================
@@ -122,11 +124,15 @@
   function fetchIMS(which) {
     return fetch(APPS_SCRIPT_URL + "?ims=" + which)
       .then(r => r.json())
-      .then(j => (j && typeof j.temp === "number") ? j : null)
+      .then(j => {
+        if (j && typeof j.temp === "number") return j;         // יש מדידת 10:30
+        if (j && j.status === "pending") return { pending: true };
+        return null;
+      })
       .catch(() => null);
   }
 
-  // התאמת פרבולה (least-squares) לטבלת רונן זוהר -> אחוז סיכוי לפי הפרש
+  // התאמת פרבולה (least-squares) לטבלת   -> אחוז סיכוי לפי הפרש
   const QUAD = fitQuad(CFG.ronen);
   function fitQuad(pts) {
     let n = pts.length, Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
@@ -179,6 +185,7 @@
 
       // --- תנאי 3: הפרש טמפרטורות ---
       let c3 = { state:"unk", title:"הפרש צמח − אבני איתן ≥ " + CFG.tempDiffMin + "°", val:"אין נתון" };
+      const pending = (tzJ && tzJ.pending) || (avJ && avJ.pending);
       const tTz = tzJ && typeof tzJ.temp === "number" ? tzJ.temp : null;
       const tAv = avJ && typeof avJ.temp === "number" ? avJ.temp : null;
       let diff = null, prob = null;
@@ -189,12 +196,14 @@
         c3 = { state, title: c3.title,
                val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
                     "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" };
+      } else if (pending) {
+        c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
       }
 
       // --- תנאי 4: מקום שמור ---
       const c4 = (diff != null)
-        ? { state:"pass", title:"ניתוח סטטיסטי", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
-        : { state:"unk", title:"ניתוח סטטיסטי", val:"ממתין לנתוני טמפרטורה" };
+        ? { state:"pass", title:"ניתוח סטטיסטי ( )", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
+        : { state:"unk", title:"ניתוח סטטיסטי ()", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
       // ציור השורות
       const rows = [c1, c2, c3, c4];
@@ -208,7 +217,9 @@
       // --- הכרעה ---
       const known = [c1, c2, c3].every(c => c.state !== "unk");
       const goodAll = c1.state === "pass" && c2.state === "pass" && c3.state === "pass";
-      if (!known) {
+      if (pending) {
+        setLight("is-wait", "ממתין ל-10:30", "מדידת הטמפרטורות תתעדכן ~10:45");
+      } else if (!known) {
         setLight("is-no", "לא ניתן לקבוע", "חלק מהנתונים לא נטענו");
       } else if (goodAll) {
         setLight("is-go", "סע לגלוש 🏄",
