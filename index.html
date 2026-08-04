@@ -632,19 +632,35 @@ function initForecast() {
   }
 
   function load(fname) {
-    return new Promise((res) => {
-      fetch(APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname))
-        .then(r => r.text())
-        .then(txt => {
-          if (!txt || txt.startsWith("Error")) return res(null);
-          const p = Papa.parse(txt, { header:true, skipEmptyLines:true });
-          const rows = p.data, cols = p.meta.fields || [];
-          if (!rows.length || !cols.length) return res(null);
-          res(analyze(rows, cols));
-        })
-        .catch(() => res(null));
-    });
-  }
+	  return new Promise((res) => {
+		fetch(APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname))
+		  .then(r => r.text())
+		  .then(txt => {
+			if (!txt || txt.startsWith("Error")) return res(null);
+
+			const p = Papa.parse(txt, { header:true, skipEmptyLines:true });
+			const rows = p.data, cols = p.meta.fields || [];
+			if (!rows.length || !cols.length) return res(null);
+
+			// ⭐ תאריך בפורמט MMDD לפי שעון ישראל
+			const d = new Date();
+			const today =
+			  d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", month:"2-digit" }) +
+			  d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", day:"2-digit" });
+
+			// ⭐ סינון נתוני היום בלבד
+			const rowsToday = rows.filter(r => r[cols[0]].startsWith(today));
+
+			if (!rowsToday.length) return res(null);
+
+			res(analyze(rowsToday, cols));
+		  })
+		  .catch(() => res(null));
+	  });
+	}
+
+
+
 
   function render(results) {
     $("fc-grid").innerHTML = SPOTS.map((s, i) => {
@@ -948,50 +964,66 @@ function initStations() {
   }
 
   function load(fname, tag) {
-    return new Promise((res) => {
-      const requestUrl = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname);
+	  return new Promise((res) => {
+		const requestUrl = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname);
 
-      fetch(requestUrl)
-        .then(response => {
-          if (!response.ok) throw new Error("HTTP error " + response.status);
-          return response.text();
-        })
-        .then(csvText => {
-          if (csvText.startsWith("Error")) return res(null);
-          Papa.parse(csvText, {
-            header: true,
-            skipEmptyLines: true,
-            complete: (r) => {
-              const rows = r.data, cols = r.meta.fields || [];
-              if (!rows.length || !cols.length) return res(null);
+		fetch(requestUrl)
+		  .then(response => {
+			if (!response.ok) throw new Error("HTTP error " + response.status);
+			return response.text();
+		  })
+		  .then(csvText => {
+			if (csvText.startsWith("Error")) return res(null);
 
-              // מיפוי לפי מיקום עמודה (הסדר בקובץ: Date/Time, Wind, Dir, Gusts)
-              // זה יציב גם כששמות העמודות מוזרים/מספריים.
-              const xkey    = cols[0];
-              const windCol = cols[1];
-              const dirCol  = cols[2] || null;
-              const gustCol = cols[3] || null;
+			Papa.parse(csvText, {
+			  header: true,
+			  skipEmptyLines: true,
+			  complete: (r) => {
+				const rows = r.data, cols = r.meta.fields || [];
+				if (!rows.length || !cols.length) return res(null);
 
-              const numCol = (c) => c ? rows.map(v => parseFloat(v[c])) : null;
-              const hasNums = (arr) => arr && arr.some(n => !isNaN(n));
+				// ⭐ זמן נוכחי לפי שעון ישראל
+				const nowIL = new Date().toLocaleString("en-GB", {
+				  timeZone: "Asia/Jerusalem",
+				  hour12: false
+				});
 
-              const speedArr = numCol(windCol);
-              const dirArr   = numCol(dirCol);
-              const gustArr  = numCol(gustCol);
+				const [datePart, timePart] = nowIL.split(", ");
+				const [day, month] = datePart.split("/");   // DD/MM/YYYY → DD/MM
+				const [hour, minute] = timePart.split(":");
 
-              res({
-                tag,
-                labels: rows.map(v => v[xkey]),
-                speed: speedArr,
-                gust: hasNums(gustArr) ? gustArr : null,
-                dir:  hasNums(dirArr)  ? dirArr  : null
-              });
-            }
-          });
-        })
-        .catch(() => res(null));
-    });
-  }
+				const todayMMDD = month + day;              // 0805
+				const nowHHMM   = hour + minute;            // 2137
+				const nowKey    = todayMMDD + "-" + nowHHMM;
+
+				// ⭐ סינון נתונים עתידיים בלבד
+				const futureRows = rows.filter(r => r[cols[0]] > nowKey);
+
+				if (!futureRows.length) return res(null);
+
+				// המשך כמו קודם — בניית מערכים לגרף/טבלה
+				const xkey    = cols[0];
+				const windCol = cols[1];
+				const dirCol  = cols[2] || null;
+				const gustCol = cols[3] || null;
+
+				const numCol = (c) => c ? futureRows.map(v => parseFloat(v[c])) : null;
+				const hasNums = (arr) => arr && arr.some(n => !isNaN(n));
+
+				res({
+				  tag,
+				  labels: futureRows.map(v => v[xkey]),
+				  speed: numCol(windCol),
+				  gust: hasNums(numCol(gustCol)) ? numCol(gustCol) : null,
+				  dir:  hasNums(numCol(dirCol))  ? numCol(dirCol)  : null
+				});
+			  }
+			});
+		  })
+		  .catch(() => res(null));
+	  });
+	}
+
 
   function drawChart(sets) {
     const colors = { Forecast:"#1273b8", Observed:"#e0552e" };
