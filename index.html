@@ -1,17 +1,4 @@
-<div id="page1"></div>
-
-<script type="module">
-import { initTrafficLights } from "./traffic-lights.js";
-
-function loadInto(id, file) {
-  return fetch(file)
-    .then(r => r.text())
-    .then(html => {
-      document.getElementById(id).innerHTML = html;
-    });
-}
-
-loadInto("page1", "traffic-lights.html").then(() => {
-  initTrafficLights("#page1");
-});
-</script>
+<iframe src="traffic-lights.html" width="100%" height="600"></iframe>
+<iframe src="Forecast.html" width="100%" height="600"></iframe>
+<iframe src="wind-stations.html" width="100%" height="600"></iframe>
+<iframe src="Live-Wind-Map.html" width="100%" height="600"></iframe>
