@@ -40,9 +40,18 @@
     <div class="wrf-title">openWRF <span class="wrf-sep">/</span> wind stations</div>
     <div class="wrf-count" id="wrf-count"></div>
   </div>
+  <div id="wrf-detail" class="wrf-detail" style="display: none;">
+    <button id="wrf-close" class="wrf-close" aria-label="Close">×</button>
+    <div class="wrf-d-name" id="wrf-d-name"></div>
+    <div class="wrf-d-sub" id="wrf-d-sub"></div>
+    <div class="wrf-d-chart"><canvas id="wrf-canvas"></canvas></div>
+    <div id="wrf-d-table-wrap"></div>
+    <div class="wrf-d-msg" id="wrf-d-msg"></div>
+  </div>
   <div class="wrf-body">
     <aside class="wrf-side">
       <input id="wrf-search" class="wrf-search" type="search" placeholder="Search station" autocomplete="off">
+      <button id="wrf-map-toggle" class="wrf-map-toggle">🗺️ הצג מפה</button>
       <div id="wrf-list" class="wrf-list" role="listbox" aria-label="Stations"></div>
       <div class="wrf-legend">
         <span><i class="dot ok"></i>located</span>
@@ -52,14 +61,6 @@
     <div class="wrf-mapwrap">
       <div id="wrf-map"></div>
     </div>
-  </div>
-  <div id="wrf-detail" class="wrf-detail" style="display: none;">
-    <button id="wrf-close" class="wrf-close" aria-label="Close">×</button>
-    <div class="wrf-d-name" id="wrf-d-name"></div>
-    <div class="wrf-d-sub" id="wrf-d-sub"></div>
-    <div class="wrf-d-chart"><canvas id="wrf-canvas"></canvas></div>
-    <div id="wrf-d-table-wrap"></div>
-    <div class="wrf-d-msg" id="wrf-d-msg"></div>
   </div>
 </div></section>
   <section class="kdi-block"><div id="wind">
@@ -217,7 +218,7 @@
     --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;
     display:flex;flex-direction:column;
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);
-    background:var(--bg);height:600px;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    background:var(--bg);height:auto;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;
     position:relative;
   }
   #wrf *{box-sizing:border-box}
@@ -226,7 +227,7 @@
   #wrf .wrf-title{font-size:15px;font-weight:650;letter-spacing:-.01em}
   #wrf .wrf-sep{color:var(--line);font-weight:400}
   #wrf .wrf-count{font-family:var(--mono);font-size:12px;color:var(--muted)}
-  #wrf .wrf-body{display:flex;flex:1;min-height:0;position:relative}
+  #wrf .wrf-body{display:flex;height:440px;min-height:0;position:relative}
   #wrf .wrf-side{width:280px;flex:none;display:flex;flex-direction:column;
     background:var(--panel);border-right:1px solid var(--line)}
   #wrf .wrf-search{margin:12px;padding:9px 12px;font:inherit;font-size:14px;color:var(--ink);
@@ -248,20 +249,19 @@
   #wrf .wrf-legend span{display:flex;align-items:center;gap:6px}
   #wrf .wrf-mapwrap{flex:1;min-width:0;position:relative;height:100%}
   #wrf #wrf-map{position:absolute;inset:0;height:100%;width:100%;background:#dfe7ee}
-  #wrf .wrf-detail{position:absolute;right:12px;top:58px;bottom:12px;width:380px;max-width:calc(100% - 24px);
-    background:var(--panel);border:1px solid var(--line);border-radius:12px;
-    box-shadow:0 6px 24px rgba(15,36,54,.14);padding:14px 16px 12px;z-index:500;
-    display:flex;flex-direction:column;overflow-y:auto}
+  #wrf .wrf-detail{position:relative;width:auto;max-width:100%;
+    background:var(--panel);border-bottom:2px solid var(--line);
+    padding:14px 18px 14px;display:flex;flex-direction:column}
   #wrf .wrf-close{position:absolute;right:8px;top:6px;border:none;background:none;font-size:20px;
     line-height:1;color:var(--muted);cursor:pointer;padding:4px}
   #wrf .wrf-d-name{font-size:15px;font-weight:650;padding-right:20px}
   #wrf .wrf-d-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin:2px 0 10px}
-  #wrf .wrf-d-chart{height:190px;flex:none}
+  #wrf .wrf-d-chart{height:240px;flex:none}
   #wrf .wrf-d-msg{font-size:12px;color:var(--muted);line-height:1.5;margin-top:4px}
 
   .wg-table-scroll { overflow-x: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; }
-  .wg-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; }
-  .wg-table th, .wg-table td { padding: 4px 6px; border: 1px solid #eef2f6; white-space: nowrap; }
+  .wg-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: center; }
+  .wg-table th, .wg-table td { padding: 5px 9px; border: 1px solid #eef2f6; white-space: nowrap; }
   .wg-table th { background: #f1f5f9; color: var(--muted); font-weight: 600; }
   .wg-table td.tag { font-weight: bold; background: #fafbfc; text-align: left; }
   .wg-table td .wind-arrow { display:inline-block; font-size:15px; font-weight:bold;
@@ -371,8 +371,8 @@
     #wrf .wrf-list{ max-height:50vh; }
     #wrf .wrf-item{ padding:12px 12px; }        /* שורות גבוהות למגע */
     #wrf .wrf-item-name{ font-size:15px; }
-    #wrf .wg-table{ font-size:12px; }
-    #wrf .wg-table th, #wrf .wg-table td{ padding:6px 8px; }
+    #wrf .wg-table{ font-size:14px; }
+    #wrf .wg-table th, #wrf .wg-table td{ padding:9px 11px; }
 
     /* --- מפת רוח חיה: גבוהה + סמנים גדולים למגע --- */
     #wind{ height:auto; }
@@ -390,6 +390,22 @@
 
   /* סמני רוח לא מוגבלים ברוחב ולא נחתכים */
   .wind-marker, .wind-bubble{ max-width:none !important; overflow:visible; }
+
+
+  /* ===== תחזית מעל המפה + מפה לפי בקשה ===== */
+  #wrf .wrf-map-toggle{ display:none; }
+  @media (max-width:640px){
+    /* כפתור להצגת המפה — מוסתרת כברירת מחדל */
+    #wrf .wrf-map-toggle{ display:block; margin:0 12px 10px; padding:11px;
+      border:1px solid var(--line); background:var(--accent-soft); color:var(--accent-strong);
+      border-radius:8px; font:inherit; font-size:15px; font-weight:700; cursor:pointer; }
+    #wrf .wrf-mapwrap{ display:none !important; }
+    #wrf.show-map .wrf-mapwrap{ display:block !important; height:62vh; min-height:420px; }
+    /* טבלת הרוח בתחזית — גדולה וברורה בנייד */
+    #wrf .wg-table{ font-size:15px !important; }
+    #wrf .wg-table th, #wrf .wg-table td{ padding:10px 12px !important; }
+    #wrf .wg-table td .wind-arrow{ font-size:18px; }
+  }
 
 </style>
 
@@ -1055,6 +1071,16 @@ function initStations() {
     $("wrf-detail").style.display = "none";
     if (selected && selected.row) selected.row.classList.remove("is-sel");
     selected = null;
+  });
+
+  var mapToggleBtn = document.getElementById("wrf-map-toggle");
+  if (mapToggleBtn) mapToggleBtn.addEventListener("click", function () {
+    var on = document.getElementById("wrf").classList.toggle("show-map");
+    mapToggleBtn.textContent = on ? "🗺️ הסתר מפה" : "🗺️ הצג מפה";
+    if (on) setTimeout(function () {
+      map.invalidateSize();
+      map.fitBounds(L.latLngBounds(STATIONS.map(function (s) { return [s.lat, s.lon]; })).pad(0.15));
+    }, 80);
   });
 
   $("wrf-search").addEventListener("input", (e) => {
