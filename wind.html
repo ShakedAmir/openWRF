@@ -34,15 +34,6 @@
   <div class="fc-grid" id="fc-grid"></div>
   <div class="fc-foot" id="fc-foot">טוען…</div>
 </div></section>
-  <section class="kdi-block"><div id="wind">
-  <div class="w-head">
-    <div class="w-title">רוח חיה <span class="w-sep">·</span> IMS</div>
-    <div class="w-legend" id="w-legend"></div>
-    <button id="w-refresh" class="w-refresh">רענן</button>
-  </div>
-  <div id="w-map"></div>
-  <div class="w-foot" id="w-foot">טוען…</div>
-</div></section>
   <section class="kdi-block"><div id="wrf">
   <div class="wrf-head">
     <div class="wrf-title">openWRF <span class="wrf-sep">/</span> wind stations</div>
@@ -69,6 +60,15 @@
     <div id="wrf-d-table-wrap"></div>
     <div class="wrf-d-msg" id="wrf-d-msg"></div>
   </div>
+</div></section>
+  <section class="kdi-block"><div id="wind">
+  <div class="w-head">
+    <div class="w-title">רוח חיה <span class="w-sep">·</span> IMS</div>
+    <div class="w-legend" id="w-legend"></div>
+    <button id="w-refresh" class="w-refresh">רענן</button>
+  </div>
+  <div id="w-map"></div>
+  <div class="w-foot" id="w-foot">טוען…</div>
 </div></section>
 </div>
 
@@ -400,7 +400,7 @@ function initGo() {
     gustFile:   "18z_1km_Kineret_Diamond.csv",
     gustMinKts: 20,
     tempDiffMin: 4,
-    // טבלת רונן זוהר: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
+    // טבלת סיכוי: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
     ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
   };
   // ======================================================================
@@ -456,7 +456,7 @@ function initGo() {
       .catch(() => null);
   }
 
-  // התאמת פרבולה (least-squares) לטבלת רונן זוהר -> אחוז סיכוי לפי הפרש
+  // התאמת פרבולה (least-squares) לטבלת הסיכוי -> אחוז סיכוי לפי הפרש
   const QUAD = fitQuad(CFG.ronen);
   function fitQuad(pts) {
     let n = pts.length, Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
@@ -526,8 +526,8 @@ function initGo() {
 
       // --- תנאי 4: מקום שמור ---
       const c4 = (diff != null)
-        ? { state:"pass", title:"ניתוח סטטיסטי (רונן זוהר)", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
-        : { state:"unk", title:"ניתוח סטטיסטי (רונן זוהר)", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
+        ? { state:"pass", title:"סיכוי לגלישה", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
+        : { state:"unk", title:"סיכוי לגלישה", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
       // ציור השורות
       const rows = [c1, c2, c3, c4];
@@ -547,7 +547,7 @@ function initGo() {
         setLight("is-no", "לא ניתן לקבוע", "חלק מהנתונים לא נטענו");
       } else if (goodAll) {
         setLight("is-go", "סע לגלוש 🏄",
-          prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "% · רונן זוהר") : "כל התנאים מתקיימים");
+          prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "%") : "כל התנאים מתקיימים");
       } else {
         const missing = [];
         if (c1.state !== "pass") missing.push("רוח");
