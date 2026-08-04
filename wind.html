@@ -316,10 +316,16 @@
   }
 
 
-  /* ===== חסימת גלילה צידית — פתרון גורף ===== */
+  /* ===== חסימת גלילה צידית (בלי לשבור את Leaflet) ===== */
   html, body{ overflow-x:hidden !important; max-width:100%; }
-  #kdi, #kdi *{ max-width:100%; }
-  #kdi{ overflow-x:hidden; }
+  #kdi{ overflow-x:hidden; max-width:100%; }
+  #kdi > .kdi-block{ max-width:100%; }
+  /* חשוב: להחריג את Leaflet — אחרת אריחי מפה וסמנים (wind-bubble) נשברים */
+  #kdi .leaflet-container img,
+  #kdi .leaflet-tile,
+  #kdi .leaflet-marker-icon,
+  #kdi .leaflet-marker-pane *,
+  #kdi .leaflet-popup-pane *{ max-width:none !important; }
   /* היחיד שמותר לו לגלול לרוחב הוא גוף הטבלה הרחבה — בתוך עצמו בלבד */
   #kdi .wg-table-scroll{ max-width:100%; overflow-x:auto; }
 
@@ -375,6 +381,10 @@
     #go .go-label{ font-size:24px; }
     #fc .fc-gust{ font-size:20px; }
   }
+
+
+  /* סמני רוח לא מוגבלים ברוחב ולא נחתכים */
+  .wind-marker, .wind-bubble{ max-width:none !important; overflow:visible; }
 
 </style>
 
