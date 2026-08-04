@@ -201,7 +201,10 @@
   .wind-bubble{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
     font-weight:800;font-size:12px;color:#0f2436;border:2px solid rgba(255,255,255,.9);
     box-shadow:0 1px 4px rgba(0,0,0,.3);font-family:ui-monospace,Menlo,monospace}
-  .wind-arrow{position:absolute;font-size:14px;color:#0f2436;text-shadow:0 0 2px #fff}
+  .wm-arrow{position:absolute;left:50%;top:50%;width:0;height:0;
+    transform-origin:center;pointer-events:none;z-index:1}
+  .wm-arrow svg{position:absolute;left:-8px;top:-33px;
+    filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
   .wind-name{position:absolute;top:36px;white-space:nowrap;font-size:10px;font-weight:600;
     color:#0f2436;text-shadow:0 0 3px #fff,0 0 3px #fff;left:50%;transform:translateX(-50%)}
   @media (max-width:640px){ #wind{height:78vh;min-height:480px} .wind-name{display:none} }
@@ -376,7 +379,6 @@
     #wind #w-map{ height:62vh; min-height:420px; flex:none; }
     #wind .w-title{ font-size:16px; }
     .wind-bubble{ width:40px; height:40px; font-size:14px; }
-    .wind-arrow{ font-size:16px; }
   }
 
   /* מסכים צרים במיוחד */
@@ -729,11 +731,15 @@ function initLive() {
       const gTxt = g != null ? Math.round(g) : "–";
       const rot = dir != null ? ((dir + 180) % 360) : 0;    // חץ עף עם הרוח
       const arrow = dir != null
-        ? '<span class="wind-arrow" style="transform:rotate('+rot+'deg)">↑</span>' : '';
+        ? '<div class="wm-arrow" style="transform:rotate('+rot+'deg)">' +
+            '<svg viewBox="0 0 16 16" width="16" height="16">' +
+              '<polygon points="8,0 15,15 8,11 1,15" fill="#0f2436" ' +
+              'stroke="#fff" stroke-width="1" stroke-linejoin="round"/>' +
+            '</svg></div>' : '';
       const html =
         '<div class="wind-marker">' +
-          '<div class="wind-bubble" style="background:'+colorFor(g)+'">'+gTxt+'</div>' +
           arrow +
+          '<div class="wind-bubble" style="background:'+colorFor(g)+'">'+gTxt+'</div>' +
           '<div class="wind-name">'+s.name+'</div>' +
         '</div>';
       const icon = L.divIcon({ html, className:"", iconSize:[34,34], iconAnchor:[17,17] });
