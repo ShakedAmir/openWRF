@@ -1,17 +1,17 @@
 <div id="page1"></div>
-<div id="page2"></div>
-<div id="page3"></div>
-<div id="page4"></div>
 
-<script>
+<script type="module">
+import { initTrafficLights } from "./traffic-lights.js";
+
 function loadInto(id, file) {
-  fetch(file)
+  return fetch(file)
     .then(r => r.text())
-    .then(html => document.getElementById(id).innerHTML = html);
+    .then(html => {
+      document.getElementById(id).innerHTML = html;
+    });
 }
 
-loadInto("page1", "traffic-lights.html");
-loadInto("page2", "Forecast.html");
-loadInto("page3", "wind-stations.html");
-loadInto("page4", "Live-Wind-Map.html");
+loadInto("page1", "traffic-lights.html").then(() => {
+  initTrafficLights("#page1");
+});
 </script>
