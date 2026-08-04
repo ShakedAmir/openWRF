@@ -517,9 +517,12 @@ function initGo() {
         diff = tTz - tAv;
         prob = probFromDiff(diff);
         const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
+        // שעת המדידה (מהחותמת שחוזרת מ-IMS)
+        const mt = (tzJ && tzJ.time ? tzJ.time : (avJ && avJ.time ? avJ.time : "")).substr(11, 5);
         c3 = { state, title: c3.title,
                val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
-                    "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" };
+                    "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" +
+                    (mt ? " · מדידת " + mt : "") };
       } else if (pending) {
         c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
       }
