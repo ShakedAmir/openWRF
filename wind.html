@@ -1,0 +1,1063 @@
+<!--
+  KDI דיימונד — לוח מאוחד (רמזור · תחזית · תחנות · רוח חיה)
+  מותאם מובייל. מקורות: WRF-1km + IMS דרך ה-Apps Script.
+  להטמעה: Google Sites → Insert → Embed → "Embed code".
+  (אם ההטמעה ארוכה מדי ל-Sites — ארח את הקובץ ב-GitHub Pages והטמע By URL.)
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<div id="kdi" dir="rtl">
+  <section class="kdi-block pad"><div id="go" dir="rtl">
+  <div class="go-light" id="go-light">
+    <div class="go-lamp" id="go-lamp"></div>
+    <div class="go-label" id="go-label">בודק תנאים…</div>
+    <div class="go-sub" id="go-sub"></div>
+  </div>
+
+  <div class="go-checks" id="go-checks"></div>
+
+  <div class="go-foot">
+    <button id="go-refresh" class="go-refresh">רענן</button>
+    <span class="go-time" id="go-time"></span>
+  </div>
+</div></section>
+  <section class="kdi-block pad"><div id="fc" dir="rtl">
+  <div class="fc-head">
+    <div class="fc-title">תחזית רוח <span id="fc-date"></span></div>
+    <button id="fc-refresh" class="fc-refresh">רענן</button>
+  </div>
+  <div class="fc-grid" id="fc-grid"></div>
+  <div class="fc-foot" id="fc-foot">טוען…</div>
+</div></section>
+  <section class="kdi-block"><div id="wind">
+  <div class="w-head">
+    <div class="w-title">רוח חיה <span class="w-sep">·</span> IMS</div>
+    <div class="w-legend" id="w-legend"></div>
+    <button id="w-refresh" class="w-refresh">רענן</button>
+  </div>
+  <div id="w-map"></div>
+  <div class="w-foot" id="w-foot">טוען…</div>
+</div></section>
+  <section class="kdi-block"><div id="wrf">
+  <div class="wrf-head">
+    <div class="wrf-title">openWRF <span class="wrf-sep">/</span> wind stations</div>
+    <div class="wrf-count" id="wrf-count"></div>
+  </div>
+  <div class="wrf-body">
+    <aside class="wrf-side">
+      <input id="wrf-search" class="wrf-search" type="search" placeholder="Search station" autocomplete="off">
+      <div id="wrf-list" class="wrf-list" role="listbox" aria-label="Stations"></div>
+      <div class="wrf-legend">
+        <span><i class="dot ok"></i>located</span>
+        <span><i class="dot chk"></i>verify</span>
+      </div>
+    </aside>
+    <div class="wrf-mapwrap">
+      <div id="wrf-map"></div>
+    </div>
+  </div>
+  <div id="wrf-detail" class="wrf-detail" style="display: none;">
+    <button id="wrf-close" class="wrf-close" aria-label="Close">×</button>
+    <div class="wrf-d-name" id="wrf-d-name"></div>
+    <div class="wrf-d-sub" id="wrf-d-sub"></div>
+    <div class="wrf-d-chart"><canvas id="wrf-canvas"></canvas></div>
+    <div id="wrf-d-table-wrap"></div>
+    <div class="wrf-d-msg" id="wrf-d-msg"></div>
+  </div>
+</div></section>
+</div>
+
+<style>
+  /* ===== מעטפת: ארבעה רכיבים אחד מתחת לשני ===== */
+  #kdi{ font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Hebrew",sans-serif;
+    max-width:900px;margin:0 auto; }
+  #kdi *{ box-sizing:border-box; }
+  #kdi .kdi-block{ margin-bottom:18px; }
+  #kdi .kdi-block:last-child{ margin-bottom:0; }
+  #kdi .kdi-block.pad{ padding:0; }
+  @media (max-width:640px){
+    #kdi .kdi-block{ margin-bottom:14px; }
+  }
+
+  /* ===== רמזור ===== */
+  #go{
+    --bg:#ffffff;--ink:#0f2436;--muted:#5b7186;--line:#e3e9ef;
+    --green:#1f9d55;--green-soft:#e6f6ec;--red:#d13b3b;--red-soft:#fbe9e9;
+    --amber:#e08a1e;--amber-soft:#fbeeda;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Hebrew",sans-serif;
+    color:var(--ink);background:var(--bg);max-width:440px;margin:0 auto;
+    border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  }
+  #go *{box-sizing:border-box}
+  #go .go-light{padding:22px 20px 18px;text-align:center;transition:background .3s}
+  #go .go-lamp{width:74px;height:74px;border-radius:50%;margin:0 auto 12px;
+    background:#cbd5e1;box-shadow:0 0 0 6px rgba(0,0,0,.04);transition:all .3s}
+  #go .go-label{font-size:26px;font-weight:800;letter-spacing:-.02em}
+  #go .go-sub{font-size:13px;color:var(--muted);margin-top:4px;min-height:16px}
+
+  #go.is-go .go-light{background:var(--green-soft)}
+  #go.is-go .go-lamp{background:var(--green);box-shadow:0 0 0 6px rgba(31,157,85,.18),0 6px 18px rgba(31,157,85,.35)}
+  #go.is-go .go-label{color:var(--green)}
+  #go.is-no .go-light{background:var(--red-soft)}
+  #go.is-no .go-lamp{background:var(--red);box-shadow:0 0 0 6px rgba(209,59,59,.16),0 6px 18px rgba(209,59,59,.3)}
+  #go.is-no .go-label{color:var(--red)}
+  #go.is-wait .go-light{background:var(--chk-soft)}
+  #go.is-wait .go-lamp{background:var(--amber);box-shadow:0 0 0 6px rgba(224,138,30,.16)}
+  #go.is-wait .go-label{color:var(--amber)}
+
+  #go .go-checks{border-top:1px solid var(--line)}
+  #go .go-check{display:flex;align-items:flex-start;gap:10px;padding:11px 18px;
+    border-bottom:1px solid var(--line);font-size:14px}
+  #go .go-check:last-child{border-bottom:none}
+  #go .go-ic{flex:none;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:13px;font-weight:800;color:#fff;margin-top:1px}
+  #go .go-ic.pass{background:var(--green)}
+  #go .go-ic.fail{background:var(--red)}
+  #go .go-ic.warn{background:var(--amber)}
+  #go .go-ic.unk{background:#9aa8b6}
+  #go .go-ctext{flex:1;min-width:0}
+  #go .go-ctitle{font-weight:600}
+  #go .go-cval{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:1px}
+
+  #go .go-foot{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 18px;background:#f7f9fb;border-top:1px solid var(--line)}
+  #go .go-refresh{border:1px solid var(--line);background:#fff;border-radius:8px;
+    padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}
+  #go .go-refresh:hover{background:#f1f5f9}
+  #go .go-time{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+  /* ===== כרטיס תחזית ===== */
+  #fc{
+    --line:#e3e9ef;--ink:#0f2436;--muted:#5b7186;--panel:#fff;--accent:#2b74b8;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Hebrew",sans-serif;
+    color:var(--ink);background:var(--panel);border:2px solid #7b96b8;border-radius:14px;
+    overflow:hidden;max-width:760px;margin:0 auto;
+  }
+  #fc *{box-sizing:border-box}
+  #fc .fc-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:12px 16px;background:#66bd6a;color:#fff}
+  #fc .fc-title{font-size:19px;font-weight:800}
+  #fc .fc-refresh{border:none;background:rgba(255,255,255,.25);color:#fff;border-radius:8px;
+    padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+  #fc .fc-refresh:hover{background:rgba(255,255,255,.4)}
+
+  #fc .fc-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:0}
+  #fc .fc-col{padding:14px 8px;text-align:center;border-left:1px solid var(--line)}
+  #fc .fc-col:last-child{border-left:none}
+  #fc .fc-spot{font-size:14px;font-weight:700;color:var(--accent);min-height:36px}
+  #fc .fc-sq{width:26px;height:26px;border-radius:5px;margin:14px auto 6px;
+    box-shadow:0 1px 3px rgba(0,0,0,.25)}
+  #fc .fc-gust{font-family:var(--mono);font-size:17px;font-weight:800}
+  #fc .fc-arrow{font-size:20px;margin-top:6px;line-height:1}
+  #fc .fc-dir{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  #fc .fc-win{margin-top:10px;font-size:13px}
+  #fc .fc-win b{font-size:16px}
+  #fc .fc-label{font-size:10px;color:var(--muted);margin-top:2px}
+  #fc .fc-na{color:#9aa8b6}
+
+  #fc .fc-foot{padding:8px 16px;background:#f7f9fb;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center}
+  @media (max-width:640px){
+    #fc .fc-grid{grid-template-columns:repeat(2,1fr)}
+    #fc .fc-col:nth-child(odd){border-left:1px solid var(--line)}
+  }
+
+  /* ===== מפת רוח חיה ===== */
+  #wind{
+    --line:#e3e9ef;--ink:#0f2436;--muted:#5b7186;--panel:#fff;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Hebrew",sans-serif;
+    color:var(--ink);background:#dfe7ee;border:1px solid var(--line);border-radius:14px;
+    overflow:hidden;height:600px;display:flex;flex-direction:column;position:relative;
+  }
+  #wind *{box-sizing:border-box}
+  #wind .w-head{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:none;flex-wrap:wrap}
+  #wind .w-title{font-size:15px;font-weight:700}
+  #wind .w-sep{color:var(--line)}
+  #wind .w-legend{display:flex;gap:2px;flex:1;min-width:120px}
+  #wind .w-legend i{flex:1;height:12px;position:relative}
+  #wind .w-legend i:first-child{border-radius:3px 0 0 3px}
+  #wind .w-legend i:last-child{border-radius:0 3px 3px 0}
+  #wind .w-legend span{font-family:var(--mono);font-size:9px;color:var(--muted);position:absolute;top:13px;right:-6px}
+  #wind .w-refresh{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;
+    font:inherit;font-size:13px;cursor:pointer}
+  #wind .w-refresh:hover{background:#f1f5f9}
+  #wind #w-map{flex:1;min-height:0}
+  #wind .w-foot{flex:none;padding:7px 14px;background:var(--panel);border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+  .wind-marker{display:flex;align-items:center;justify-content:center;position:relative}
+  .wind-bubble{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-weight:800;font-size:12px;color:#0f2436;border:2px solid rgba(255,255,255,.9);
+    box-shadow:0 1px 4px rgba(0,0,0,.3);font-family:ui-monospace,Menlo,monospace}
+  .wind-arrow{position:absolute;font-size:14px;color:#0f2436;text-shadow:0 0 2px #fff}
+  .wind-name{position:absolute;top:36px;white-space:nowrap;font-size:10px;font-weight:600;
+    color:#0f2436;text-shadow:0 0 3px #fff,0 0 3px #fff;left:50%;transform:translateX(-50%)}
+  @media (max-width:640px){ #wind{height:78vh;min-height:480px} .wind-name{display:none} }
+
+  /* ===== מפת תחנות ===== */
+  #wrf{
+    --bg:#f7f9fb;--panel:#fff;--ink:#0f2436;--muted:#5b7186;--line:#e3e9ef;
+    --accent:#1273b8;--accent-strong:#0c5286;--accent-soft:#e7f2fb;
+    --chk:#e08a1e;--chk-soft:#fbeeda;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;
+    display:flex;flex-direction:column;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);
+    background:var(--bg);height:600px;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    position:relative;
+  }
+  #wrf *{box-sizing:border-box}
+  #wrf .wrf-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+  #wrf .wrf-title{font-size:15px;font-weight:650;letter-spacing:-.01em}
+  #wrf .wrf-sep{color:var(--line);font-weight:400}
+  #wrf .wrf-count{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  #wrf .wrf-body{display:flex;flex:1;min-height:0;position:relative}
+  #wrf .wrf-side{width:280px;flex:none;display:flex;flex-direction:column;
+    background:var(--panel);border-right:1px solid var(--line)}
+  #wrf .wrf-search{margin:12px;padding:9px 12px;font:inherit;font-size:14px;color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;background:#fff;outline:none}
+  #wrf .wrf-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  #wrf .wrf-list{flex:1;overflow-y:auto;padding:0 8px 8px}
+  #wrf .wrf-item{padding:8px 10px;border-radius:8px;cursor:pointer;border-left:3px solid transparent;display:flex;align-items:center;gap:8px}
+  #wrf .wrf-item:hover{background:var(--bg)}
+  #wrf .wrf-item.is-sel{background:var(--accent-soft);border-left-color:var(--accent)}
+  #wrf .wrf-item .dot{flex:none}
+  #wrf .wrf-item-txt{min-width:0}
+  #wrf .wrf-item-name{font-size:14px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #wrf .wrf-item-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:1px}
+  #wrf .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  #wrf .dot.ok{background:var(--accent)}
+  #wrf .dot.chk{background:#fff;border:2px solid var(--chk)}
+  #wrf .wrf-legend{display:flex;gap:14px;padding:9px 14px;border-top:1px solid var(--line);
+    font-size:12px;color:var(--muted)}
+  #wrf .wrf-legend span{display:flex;align-items:center;gap:6px}
+  #wrf .wrf-mapwrap{flex:1;min-width:0;position:relative;height:100%}
+  #wrf #wrf-map{position:absolute;inset:0;height:100%;width:100%;background:#dfe7ee}
+  #wrf .wrf-detail{position:absolute;right:12px;top:58px;bottom:12px;width:380px;max-width:calc(100% - 24px);
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 6px 24px rgba(15,36,54,.14);padding:14px 16px 12px;z-index:500;
+    display:flex;flex-direction:column;overflow-y:auto}
+  #wrf .wrf-close{position:absolute;right:8px;top:6px;border:none;background:none;font-size:20px;
+    line-height:1;color:var(--muted);cursor:pointer;padding:4px}
+  #wrf .wrf-d-name{font-size:15px;font-weight:650;padding-right:20px}
+  #wrf .wrf-d-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin:2px 0 10px}
+  #wrf .wrf-d-chart{height:190px;flex:none}
+  #wrf .wrf-d-msg{font-size:12px;color:var(--muted);line-height:1.5;margin-top:4px}
+
+  .wg-table-scroll { overflow-x: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .wg-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; }
+  .wg-table th, .wg-table td { padding: 4px 6px; border: 1px solid #eef2f6; white-space: nowrap; }
+  .wg-table th { background: #f1f5f9; color: var(--muted); font-weight: 600; }
+  .wg-table td.tag { font-weight: bold; background: #fafbfc; text-align: left; }
+  .wg-table td .wind-arrow { display:inline-block; font-size:15px; font-weight:bold;
+    line-height:1; color:var(--accent-strong); }
+
+  /* טבלה שנפתחת בתוך פריט ברשימה (מובייל) */
+  #wrf .wrf-item-detail{ padding:0 6px 10px; }
+  #wrf .wrf-item-detail .wrf-m-msg{ padding:6px 8px 10px; font-size:12px; color:var(--muted); }
+
+  @media (max-width:640px){
+    #wrf{height:82vh;min-height:520px}
+    #wrf .wrf-body{flex-direction:column;min-height:0}
+    /* רשימה למעלה (גוללת), מפה בחלון קבוע מתחת */
+    #wrf .wrf-side{width:auto;border-right:none;flex:1 1 auto;min-height:120px;max-height:none}
+    #wrf .wrf-mapwrap{flex:none;height:260px;border-top:1px solid var(--line)}
+    #wrf .wrf-legend{display:flex}
+    /* אין פאנל צף/מסך-מלא במובייל */
+    #wrf .wrf-detail{display:none !important}
+  }
+
+  /* ===== מובייל: ביטול גלילה פנימית — כל רכיב בגובה טבעי ===== */
+  @media (max-width:640px){
+    /* רמזור: גובה טבעי */
+    #go{ height:auto; }
+    /* כרטיס תחזית: ממילא גובה טבעי — רק לוודא שאין חיתוך */
+    #fc{ height:auto; }
+    /* מפת תחנות: לפרוש את הרשימה והמפה במלואן, בלי גלילה פנימית */
+    #wrf{ height:auto; }
+    #wrf .wrf-body{ display:block; }
+    #wrf .wrf-side{ max-height:none; border-bottom:1px solid var(--line); }
+    #wrf .wrf-list{ max-height:60vh; }          /* הרשימה עדיין גוללת מעט אם ארוכה */
+    #wrf .wrf-mapwrap{ height:320px; }          /* המפה בגובה קבוע סביר */
+    /* מפת רוח חיה: גובה סביר, בלי חלון גלילה */
+    #wind{ height:auto; }
+    #wind #w-map{ height:360px; flex:none; }
+    /* גוף הלוח: לתת לדף לגלול, לא לחתוך */
+  }
+
+
+  /* ===== חסימת גלילה צידית בנייד ===== */
+  @media (max-width:640px){
+    /* המעטפת לא חורגת מהמסך ואין גלילה אופקית ברמת העמוד */
+    #kdi{ max-width:100%; overflow-x:hidden; }
+    #kdi .kdi-block{ max-width:100%; overflow-x:hidden; }
+
+    /* אף רכיב לא רחב מהמסך (מבטל max-width קבועים כמו 440/760) */
+    #go, #fc, #wrf, #wind{ max-width:100% !important; width:100%; }
+
+    /* הטבלה הרחבה של הרוח: גלילה רק בתוך התיבה שלה, לא בעמוד */
+    #wrf .wg-table-scroll{ max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    #wrf .wg-table{ min-width:0; }
+
+    /* המפות לא חורגות לרוחב */
+    #wrf .wrf-mapwrap, #wrf #wrf-map, #wind #w-map{ max-width:100%; }
+
+    /* כרטיס התחזית: לוודא שהרשת לא דוחפת רוחב */
+    #fc .fc-grid{ max-width:100%; }
+  }
+
+
+  /* ===== חסימת גלילה צידית — פתרון גורף ===== */
+  html, body{ overflow-x:hidden !important; max-width:100%; }
+  #kdi, #kdi *{ max-width:100%; }
+  #kdi{ overflow-x:hidden; }
+  /* היחיד שמותר לו לגלול לרוחב הוא גוף הטבלה הרחבה — בתוך עצמו בלבד */
+  #kdi .wg-table-scroll{ max-width:100%; overflow-x:auto; }
+
+
+  /* ========= שיפורי מובייל מקיפים (נוחות מגע) ========= */
+  @media (max-width:640px){
+    #kdi{ padding:0 4px; }
+
+    /* כפתורים גדולים למגע בכל הרכיבים */
+    #go .go-refresh, #fc .fc-refresh, #wind .w-refresh, #wrf .wrf-search{
+      min-height:42px; font-size:15px; padding:10px 16px;
+    }
+
+    /* --- רמזור: גדול וברור --- */
+    #go{ max-width:100%; }
+    #go .go-lamp{ width:88px; height:88px; }
+    #go .go-label{ font-size:28px; }
+    #go .go-check{ padding:13px 16px; font-size:15px; }
+
+    /* --- כרטיס תחזית: עמודה אחת, שורות רחבות ונוחות --- */
+    #fc .fc-grid{ grid-template-columns:1fr; }
+    #fc .fc-col{ border-left:none !important; border-bottom:1px solid var(--line);
+      display:grid; grid-template-columns:1fr auto auto; align-items:center;
+      gap:10px; text-align:right; padding:12px 14px; }
+    #fc .fc-col:last-child{ border-bottom:none; }
+    #fc .fc-spot{ min-height:0; font-size:16px; text-align:right; }
+    #fc .fc-sq{ margin:0; width:30px; height:30px; }
+    #fc .fc-gust{ font-size:22px; }
+    #fc .fc-label{ display:none; }             /* לצמצם רעש */
+    #fc .fc-arrow{ margin:0; font-size:22px; }
+    #fc .fc-dir{ font-size:12px; }
+    #fc .fc-win{ grid-column:1 / -1; margin-top:6px; font-size:14px;
+      border-top:1px dashed var(--line); padding-top:6px; }
+
+    /* --- מפת תחנות WRF: גבוהה ונוחה --- */
+    #wrf .wrf-mapwrap{ height:62vh; min-height:420px; }
+    #wrf .wrf-list{ max-height:50vh; }
+    #wrf .wrf-item{ padding:12px 12px; }        /* שורות גבוהות למגע */
+    #wrf .wrf-item-name{ font-size:15px; }
+    #wrf .wg-table{ font-size:12px; }
+    #wrf .wg-table th, #wrf .wg-table td{ padding:6px 8px; }
+
+    /* --- מפת רוח חיה: גבוהה + סמנים גדולים למגע --- */
+    #wind{ height:auto; }
+    #wind #w-map{ height:62vh; min-height:420px; flex:none; }
+    #wind .w-title{ font-size:16px; }
+    .wind-bubble{ width:40px; height:40px; font-size:14px; }
+    .wind-arrow{ font-size:16px; }
+  }
+
+  /* מסכים צרים במיוחד */
+  @media (max-width:380px){
+    #go .go-label{ font-size:24px; }
+    #fc .fc-gust{ font-size:20px; }
+  }
+
+</style>
+
+<script>
+function initGo() {
+
+  // ===== CONFIG =========================================================
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwAM44xZxQn7Nq6E5c9kGsrorxTUWQCDWsT9Z544JF4vhx7mNw7HmLRdYaegbbfU059/exec";
+
+  const CFG = {
+    med:        { lat: 32.40, lon: 34.25 },   // נקודה בים התיכון (כמו Windy של KDI)
+    favDir:     [170, 290],                   // דרום→מערב (מעלות, מטאורולוגי)
+    gustFile:   "18z_1km_Kineret_Diamond.csv",
+    gustMinKts: 20,
+    tempDiffMin: 4,
+    // טבלת רונן זוהר: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
+    ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
+  };
+  // ======================================================================
+
+  const $ = (id) => document.getElementById(id);
+  const root = $("go");
+
+  const compass = (d) => {
+    const dirs = ["צפון","צ-מז","מזרח","ד-מז","דרום","ד-מע","מערב","צ-מע"];
+    return dirs[Math.round(((d % 360) / 45)) % 8];
+  };
+  const inRange = (d, [a, b]) => { d = ((d % 360) + 360) % 360; return d >= a && d <= b; };
+
+  function omCurrent(pt, params) {
+    const url = "https://api.open-meteo.com/v1/forecast?latitude=" + pt.lat +
+      "&longitude=" + pt.lon + "&current=" + params +
+      "&wind_speed_unit=kn&timezone=auto";
+    return fetch(url).then(r => r.json());
+  }
+
+  function fetchGustMax() {
+    const url = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(CFG.gustFile);
+    return fetch(url).then(r => r.text()).then(txt => {
+      if (!txt || txt.startsWith("Error")) return null;
+      const lines = txt.trim().split(/\r?\n/);
+      let max = -Infinity, at = "";
+      for (let i = 1; i < lines.length; i++) {
+        const c = lines[i].split(",");
+        const g = parseFloat(c[3]);           // עמודה 4 = Gusts
+        if (!isNaN(g) && g > max) { max = g; at = c[0]; }
+      }
+      return isFinite(max) ? { max, at } : null;
+    }).catch(() => null);
+  }
+
+  const ICON = { pass: ["pass","✓"], fail: ["fail","✕"], warn: ["warn","!"], unk: ["unk","?"] };
+
+  function setLight(state, label, sub) {
+    root.classList.remove("is-go","is-no","is-wait");
+    root.classList.add(state);
+    $("go-label").textContent = label;
+    $("go-sub").textContent = sub || "";
+  }
+
+  function fetchIMS(which) {
+    return fetch(APPS_SCRIPT_URL + "?ims=" + which)
+      .then(r => r.json())
+      .then(j => {
+        if (j && typeof j.temp === "number") return j;         // יש מדידת 10:30
+        if (j && j.status === "pending") return { pending: true };
+        return null;
+      })
+      .catch(() => null);
+  }
+
+  // התאמת פרבולה (least-squares) לטבלת רונן זוהר -> אחוז סיכוי לפי הפרש
+  const QUAD = fitQuad(CFG.ronen);
+  function fitQuad(pts) {
+    let n = pts.length, Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
+    pts.forEach(([x,y]) => { const x2=x*x;
+      Sx+=x; Sx2+=x2; Sx3+=x2*x; Sx4+=x2*x2; Sy+=y; Sxy+=x*y; Sx2y+=x2*y; });
+    return solve3([[Sx4,Sx3,Sx2,Sx2y],[Sx3,Sx2,Sx,Sxy],[Sx2,Sx,n,Sy]]);
+  }
+  function solve3(M) {
+    for (let i=0;i<3;i++){
+      const pv=M[i][i];
+      for (let k=i;k<4;k++) M[i][k]/=pv;
+      for (let r=0;r<3;r++) if (r!==i){ const f=M[r][i]; for (let k=i;k<4;k++) M[r][k]-=f*M[i][k]; }
+    }
+    return [M[0][3], M[1][3], M[2][3]];
+  }
+  function probFromDiff(d) {
+    const [a,b,c] = QUAD;
+    return Math.max(0, Math.min(100, a*d*d + b*d + c));
+  }
+
+  function run() {
+    setLight("is-wait", "בודק תנאים…", "");
+    $("go-checks").innerHTML = "";
+    $("go-refresh").disabled = true;
+
+    Promise.all([
+      omCurrent(CFG.med, "wind_direction_10m,wind_speed_10m"),
+      fetchGustMax(),
+      fetchIMS("zemah"),
+      fetchIMS("avnei")
+    ]).then(([medJ, gust, tzJ, avJ]) => {
+      // --- תנאי 1: כיוון רוח בים ---
+      let c1 = { state:"unk", title:"רוח דרומית/מערבית בים התיכון", val:"אין נתון" };
+      const wdir = medJ && medJ.current ? medJ.current.wind_direction_10m : null;
+      const wspd = medJ && medJ.current ? medJ.current.wind_speed_10m : null;
+      if (wdir != null) {
+        const ok = inRange(wdir, CFG.favDir);
+        c1 = { state: ok ? "pass" : "fail", title: c1.title,
+               val: "כיוון " + Math.round(wdir) + "° (" + compass(wdir) + ")" +
+                    (wspd != null ? " · " + Math.round(wspd) + " קשר" : "") };
+      }
+
+      // --- תנאי 2: גאסטים WRF ---
+      let c2 = { state:"unk", title:"גאסטים > " + CFG.gustMinKts + " קשר (WRF דיימונד)", val:"אין נתון" };
+      if (gust) {
+        const ok = gust.max > CFG.gustMinKts;
+        c2 = { state: ok ? "pass" : "fail", title: c2.title,
+               val: "מקסימום " + Math.round(gust.max) + " קשר" + (gust.at ? " · " + gust.at : "") };
+      }
+
+      // --- תנאי 3: הפרש טמפרטורות ---
+      let c3 = { state:"unk", title:"הפרש צמח − אבני איתן ≥ " + CFG.tempDiffMin + "°", val:"אין נתון" };
+      const pending = (tzJ && tzJ.pending) || (avJ && avJ.pending);
+      const tTz = tzJ && typeof tzJ.temp === "number" ? tzJ.temp : null;
+      const tAv = avJ && typeof avJ.temp === "number" ? avJ.temp : null;
+      let diff = null, prob = null;
+      if (tTz != null && tAv != null) {
+        diff = tTz - tAv;
+        prob = probFromDiff(diff);
+        const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
+        c3 = { state, title: c3.title,
+               val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
+                    "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" };
+      } else if (pending) {
+        c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
+      }
+
+      // --- תנאי 4: מקום שמור ---
+      const c4 = (diff != null)
+        ? { state:"pass", title:"ניתוח סטטיסטי (רונן זוהר)", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
+        : { state:"unk", title:"ניתוח סטטיסטי (רונן זוהר)", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
+
+      // ציור השורות
+      const rows = [c1, c2, c3, c4];
+      $("go-checks").innerHTML = rows.map(r => {
+        const [cls, ch] = ICON[r.state] || ICON.unk;
+        return '<div class="go-check"><span class="go-ic ' + cls + '">' + ch + '</span>' +
+          '<span class="go-ctext"><span class="go-ctitle">' + r.title + '</span>' +
+          '<span class="go-cval">' + r.val + '</span></span></div>';
+      }).join("");
+
+      // --- הכרעה ---
+      const known = [c1, c2, c3].every(c => c.state !== "unk");
+      const goodAll = c1.state === "pass" && c2.state === "pass" && c3.state === "pass";
+      if (pending) {
+        setLight("is-wait", "ממתין ל-10:30", "מדידת הטמפרטורות תתעדכן ~10:45");
+      } else if (!known) {
+        setLight("is-no", "לא ניתן לקבוע", "חלק מהנתונים לא נטענו");
+      } else if (goodAll) {
+        setLight("is-go", "סע לגלוש 🏄",
+          prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "% · רונן זוהר") : "כל התנאים מתקיימים");
+      } else {
+        const missing = [];
+        if (c1.state !== "pass") missing.push("רוח");
+        if (c2.state !== "pass") missing.push("גאסטים");
+        if (c3.state !== "pass") missing.push("הפרש טמפ׳");
+        setLight("is-no", "לא לגלוש", "חסר: " + missing.join(", "));
+      }
+
+      const now = new Date();
+      $("go-time").textContent = "עודכן " + now.toLocaleTimeString("he-IL", {hour:"2-digit", minute:"2-digit"});
+      $("go-refresh").disabled = false;
+    });
+  }
+
+  $("go-refresh").addEventListener("click", run);
+  run();
+}
+
+function initForecast() {
+
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwAM44xZxQn7Nq6E5c9kGsrorxTUWQCDWsT9Z544JF4vhx7mNw7HmLRdYaegbbfU059/exec";
+  const PREFIX = "18z_1km_";
+  const WINDOW_KTS = 18;   // סף לחלון רוח
+
+  const SPOTS = [
+    { f:"Kineret_Diamond", name:"דיימונד" },
+    { f:"Betzet",          name:"בֶּצֶת" },
+    { f:"Kiryat_Yam",      name:"קרית ים" },
+    { f:"Nahsholim_Club",  name:"נחשולים" },
+    { f:"Beit_Yanai",      name:"בית ינאי" }
+  ];
+
+  // סקאלת windguru (קשרים -> צבע)
+  const SCALE = [[0,"#e9f2f7"],[5,"#c9e6f0"],[8,"#8fd9c8"],[11,"#67d76b"],
+    [14,"#b6e34a"],[17,"#f2e13d"],[20,"#f2a93d"],[24,"#ec5e3a"],[28,"#d93030"],[34,"#a02694"]];
+  const colorFor = (k) => { if (k==null) return "#cbd5e1"; let c=SCALE[0][1];
+    for (const [t,col] of SCALE) if (k>=t) c=col; return c; };
+  const compass = (d) => ["צפונית","צ-מזרחית","מזרחית","ד-מזרחית","דרומית","ד-מערבית","מערבית","צ-מערבית"][Math.round(((d%360)/45))%8];
+
+  const $ = (id) => document.getElementById(id);
+
+  function analyze(rows, cols) {
+    // עמודות לפי מיקום: 0=Date/Time, 1=Wind, 2=Dir, 3=Gusts
+    const gcol = cols[3] || cols[1];
+    const dcol = cols[2];
+    let maxG = -Infinity, maxAt = "", dirAtMax = null;
+    let run = 0, bestRun = 0;                       // חלון רוח = רצף הכי ארוך מעל הסף
+    const stepH = 0.5;                              // כל רשומה = חצי שעה (0800,0830...)
+    rows.forEach(r => {
+      const g = parseFloat(r[gcol]);
+      if (!isNaN(g)) {
+        if (g > maxG) { maxG = g; maxAt = r[cols[0]]; dirAtMax = dcol ? parseFloat(r[dcol]) : null; }
+        if (g >= WINDOW_KTS) { run += stepH; if (run > bestRun) bestRun = run; }
+        else run = 0;
+      }
+    });
+    return { gust: isFinite(maxG) ? maxG : null, window: bestRun, dir: dirAtMax };
+  }
+
+  function load(fname) {
+    return new Promise((res) => {
+      fetch(APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname))
+        .then(r => r.text())
+        .then(txt => {
+          if (!txt || txt.startsWith("Error")) return res(null);
+          const p = Papa.parse(txt, { header:true, skipEmptyLines:true });
+          const rows = p.data, cols = p.meta.fields || [];
+          if (!rows.length || !cols.length) return res(null);
+          res(analyze(rows, cols));
+        })
+        .catch(() => res(null));
+    });
+  }
+
+  function render(results) {
+    $("fc-grid").innerHTML = SPOTS.map((s, i) => {
+      const d = results[i];
+      const g = d && d.gust != null ? Math.round(d.gust) : null;
+      const win = d ? d.window : 0;
+      const dir = d && d.dir != null && !isNaN(d.dir) ? d.dir : null;
+      const arrow = dir != null
+        ? '<div class="fc-arrow" style="transform:rotate('+((dir+180)%360)+'deg)">↑</div>'
+          + '<div class="fc-dir">'+Math.round(dir)+'° '+compass(dir)+'</div>'
+        : '<div class="fc-arrow fc-na">–</div>';
+      return '<div class="fc-col">' +
+        '<div class="fc-spot">'+s.name+'</div>' +
+        '<div class="fc-sq" style="background:'+colorFor(g)+'"></div>' +
+        '<div class="fc-gust'+(g==null?' fc-na':'')+'">'+(g!=null?g:'–')+'</div>' +
+        '<div class="fc-label">שיא גאסט (קשר)</div>' +
+        arrow +
+        '<div class="fc-win">חלון: <b>'+(win>0?win:'0')+'</b> ש׳</div>' +
+        '<div class="fc-label">מעל '+WINDOW_KTS+' קשר</div>' +
+      '</div>';
+    }).join("");
+  }
+
+  function run() {
+    $("fc-foot").textContent = "טוען…";
+    $("fc-refresh").disabled = true;
+    Promise.all(SPOTS.map(s => load(PREFIX + s.f + ".csv"))).then(results => {
+      render(results);
+      const ok = results.filter(Boolean).length;
+      $("fc-date").textContent = new Date().toLocaleDateString("he-IL", {weekday:"long", day:"numeric", month:"long"});
+      $("fc-foot").textContent = "מקור: WRF-1km · " + ok + "/" + SPOTS.length + " ספוטים נטענו · חלון = רצף שעות מעל " + WINDOW_KTS + " קשר";
+      $("fc-refresh").disabled = false;
+    });
+  }
+
+  $("fc-refresh").addEventListener("click", run);
+  run();
+}
+
+function initLive() {
+
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwAM44xZxQn7Nq6E5c9kGsrorxTUWQCDWsT9Z544JF4vhx7mNw7HmLRdYaegbbfU059/exec";
+
+  // תחנות חוף + כנרת (id, שם, קואורדינטות מ-IMS)
+  const STATIONS = [
+    { id:26,  name:"חיפה נמל",    lat:32.8283, lon:34.9977 },
+    { id:44,  name:"עין כרמל",    lat:32.6808, lon:34.9594 },
+    { id:45,  name:"זכרון יעקב",  lat:32.5724, lon:34.9546 },
+    { id:46,  name:"חדרה נמל",    lat:32.4732, lon:34.8815 },
+    { id:178, name:"ת״א חוף",     lat:32.058,  lon:34.7588 },
+    { id:124, name:"אשדוד נמל",   lat:31.8342, lon:34.6377 },
+    { id:274, name:"ניצן",        lat:31.7319, lon:34.6348 },
+    { id:208, name:"אשקלון נמל",  lat:31.6394, lon:34.5215 },
+    // כנרת
+    { id:205, name:"כפר נחום",    lat:32.8835, lon:35.5792 },
+    { id:6,   name:"בית צידה",    lat:32.88,   lon:35.6504 },
+    { id:115, name:"לב כנרת",     lat:32.8214, lon:35.6053 },
+    { id:502, name:"טבריה",       lat:32.7724, lon:35.5458 },
+    { id:8,   name:"צמח",         lat:32.7024, lon:35.5839 },
+    { id:123, name:"גמלא",        lat:32.9052, lon:35.7487 },
+    { id:2,   name:"אבני איתן",   lat:32.8174, lon:35.7622 }
+  ];
+
+  // סקאלת windguru: גאסט בקשרים -> צבע
+  const SCALE = [
+    [0,"#e9f2f7"],[5,"#c9e6f0"],[8,"#8fd9c8"],[11,"#67d76b"],
+    [14,"#b6e34a"],[17,"#f2e13d"],[20,"#f2a93d"],[24,"#ec5e3a"],
+    [28,"#d93030"],[34,"#a02694"]
+  ];
+  const kts = (ms) => ms == null ? null : ms * 1.94384;
+  function colorFor(k) {
+    if (k == null) return "#cbd5e1";
+    let c = SCALE[0][1];
+    for (const [t, col] of SCALE) if (k >= t) c = col;
+    return c;
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const map = L.map($("w-map"), { scrollWheelZoom:false });
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    { maxZoom:18, attribution:"© OpenStreetMap · CARTO" }).addTo(map);
+  map.fitBounds(L.latLngBounds(STATIONS.map(s => [s.lat, s.lon])).pad(0.12));
+  setTimeout(() => map.invalidateSize(), 300);
+
+  // מקרא צבעים
+  $("w-legend").innerHTML = SCALE.map(([t,c],i) =>
+    '<i style="background:'+c+'">'+(i%2===0?'<span>'+t+'</span>':'')+'</i>').join("");
+
+  let markers = [];
+  function draw(data) {
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+    let live = 0, latest = "";
+    STATIONS.forEach(s => {
+      const d = data ? data[s.id] : null;
+      const g = d ? kts(d.gust != null ? d.gust : d.ws) : null;
+      const dir = d ? d.dir : null;
+      if (d && d.time && d.time > latest) latest = d.time;
+      if (g != null) live++;
+      const gTxt = g != null ? Math.round(g) : "–";
+      const rot = dir != null ? ((dir + 180) % 360) : 0;    // חץ עף עם הרוח
+      const arrow = dir != null
+        ? '<span class="wind-arrow" style="transform:rotate('+rot+'deg)">↑</span>' : '';
+      const html =
+        '<div class="wind-marker">' +
+          '<div class="wind-bubble" style="background:'+colorFor(g)+'">'+gTxt+'</div>' +
+          arrow +
+          '<div class="wind-name">'+s.name+'</div>' +
+        '</div>';
+      const icon = L.divIcon({ html, className:"", iconSize:[34,34], iconAnchor:[17,17] });
+      const mk = L.marker([s.lat, s.lon], { icon })
+        .addTo(map)
+        .bindPopup('<b>'+s.name+'</b><br>גאסט: '+gTxt+' קשר' +
+                   (dir!=null ? '<br>כיוון: '+Math.round(dir)+'°' : '') +
+                   (d&&d.time ? '<br>'+d.time.substr(11,5) : '<br>אין נתון'));
+      markers.push(mk);
+    });
+    $("w-foot").textContent = latest
+      ? ("עודכן " + latest.substr(11,5) + " · " + live + "/" + STATIONS.length + " תחנות פעילות")
+      : "אין נתונים כרגע";
+  }
+
+  function load() {
+    $("w-foot").textContent = "טוען…";
+    $("w-refresh").disabled = true;
+    const ids = STATIONS.map(s => s.id).join(",");
+    fetch(APPS_SCRIPT_URL + "?wind=" + ids)
+      .then(r => r.json())
+      .then(data => { draw(data); })
+      .catch(() => { draw(null); $("w-foot").textContent = "שגיאה בטעינת הנתונים"; })
+      .finally(() => { $("w-refresh").disabled = false; });
+  }
+
+  $("w-refresh").addEventListener("click", load);
+  load();
+}
+
+function initStations() {
+
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwAM44xZxQn7Nq6E5c9kGsrorxTUWQCDWsT9Z544JF4vhx7mNw7HmLRdYaegbbfU059/exec";
+
+  // אם החצים יוצאים הפוכים, שנה ל-false
+  const ARROW_POINTS_DOWNWIND = true;
+
+// (אין יותר צורך ב-DRIVE_FILES — מחפשים לפי שם דרך ה-Apps Script)
+
+  const PREFIX = "18z_1km_";
+
+  const STATIONS = [
+    {f:"Ako_Hatmarim",           lat:32.922, lon:35.069, model:true,  obs:true,  conf:"ok"},
+    {f:"Ashdod_Hakshatot",       lat:31.789, lon:34.633, model:true,  obs:true,  conf:"ok"},
+    {f:"Ashkelon",               lat:31.669, lon:34.560, model:true,  obs:false, conf:"ok"},
+    {f:"Atlit_Mivtzar",          lat:32.702, lon:34.940, model:true,  obs:true,  conf:"ok"},
+    {f:"Bat_Galim_Church",       lat:32.829, lon:34.983, model:true,  obs:true,  conf:"ok"},
+    {f:"Bat_Galim_Club",         lat:32.831, lon:34.980, model:true,  obs:false, conf:"ok"},
+    {f:"Bat_Yam_Taio",           lat:32.017, lon:34.740, model:true,  obs:false, conf:"chk"},
+    {f:"Beit_Yanai",             lat:32.389, lon:34.868, model:true,  obs:true,  conf:"ok"},
+    {f:"Betzet",                 lat:33.058, lon:35.109, model:true,  obs:true,  conf:"ok"},
+    {f:"Bikat_Beit_Netofa",      lat:32.800, lon:35.290, model:true,  obs:false, conf:"chk"},
+    {f:"Haifa_Shikmona",         lat:32.826, lon:34.954, model:false, obs:true,  conf:"ok"},
+    {f:"Herzliya",               lat:32.163, lon:34.797, model:true,  obs:true,  conf:"ok"},
+    {f:"Kineret_Diamond",        lat:32.8347, lon:35.6442, model:true,  obs:true,  conf:"chk"},
+    {f:"Kineret_Gino",           lat:32.8835, lon:35.5792, model:true,  obs:false, conf:"chk"},
+    {f:"Kineret_Horsha",         lat:32.870, lon:35.630, model:true,  obs:false, conf:"chk"},
+    {f:"Kineret_Mazof_Ein_Sheva",lat:32.8677, lon:35.5523, model:false, obs:true,  conf:"chk"},
+    {f:"Kineret_Mezach_Kfar_Nachum",lat:32.881,lon:35.575,model:false,obs:true,  conf:"chk"},
+    {f:"Kineret_Migdal",         lat:32.838, lon:35.510, model:true,  obs:true,  conf:"ok"},
+    {f:"Kiryat_Yam",             lat:32.848, lon:35.070, model:true,  obs:true,  conf:"ok"},
+    {f:"Maagar_Bnei_Israel",     lat:32.500, lon:35.500, model:true,  obs:false, conf:"chk"},
+    {f:"Maayan_Tzvi",            lat:32.558, lon:34.932, model:true,  obs:false, conf:"chk"},
+    {f:"Nahsholim_Club",         lat:32.615, lon:34.917, model:true,  obs:false, conf:"ok"},
+    {f:"Neve_Yam",               lat:32.681, lon:34.919, model:true,  obs:false, conf:"ok"},
+    {f:"Nirvana",                lat:32.8006, lon:34.9564, model:true,  obs:true,  conf:"chk"},
+    {f:"Poleg",                  lat:32.282, lon:34.833, model:true,  obs:false, conf:"ok"},
+    {f:"Sdot_Yam",               lat:32.494, lon:34.891, model:true,  obs:false, conf:"ok"},
+    {f:"Shavei_Tzion",           lat:32.984, lon:35.089, model:true,  obs:true,  conf:"ok"},
+    {f:"Tel_Aviv_Geula",         lat:32.076, lon:34.763, model:true,  obs:false, conf:"ok"},
+    {f:"Tel_Aviv_Tel_Baruch",    lat:32.128, lon:34.791, model:true,  obs:false, conf:"ok"},
+    {f:"Zikim",                  lat:31.605, lon:34.518, model:true,  obs:true,  conf:"ok"}
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const nice = (s) => s.replace(/_/g, " ");
+  const listEl = $("wrf-list"), countEl = $("wrf-count");
+
+  const map = L.map($("wrf-map"), {scrollWheelZoom:false});
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {maxZoom:18, attribution:"© OpenStreetMap"}).addTo(map);
+
+  let selected = null, chart = null;
+
+  STATIONS.forEach((s) => {
+    s.name = nice(s.f);
+    const isChk = s.conf === "chk";
+    s.marker = L.circleMarker([s.lat, s.lon], {
+      radius:7, weight:2,
+      color:isChk ? "#e08a1e" : "#0c5286",
+      fillColor:isChk ? "#ffffff" : "#1273b8",
+      fillOpacity:isChk ? 1 : .85
+    }).addTo(map);
+    s.marker.on("click", () => select(s, false));
+
+    const wrap = document.createElement("div");
+    wrap.className = "wrf-item-wrap";
+    const row = document.createElement("div");
+    row.className = "wrf-item"; row.setAttribute("role","option");
+    row.innerHTML = '<i class="dot"></i><div class="wrf-item-txt">'
+      + '<div class="wrf-item-name"></div><div class="wrf-item-sub"></div></div>';
+    row.querySelector(".dot").classList.add(isChk ? "chk" : "ok");
+    row.querySelector(".wrf-item-name").textContent = s.name;
+    const files = [s.model && "forecast", s.obs && "observed"].filter(Boolean).join(" + ");
+    row.querySelector(".wrf-item-sub").textContent = s.lat.toFixed(3)+", "+s.lon.toFixed(3)+"  ·  "+files;
+    row.addEventListener("click", () => select(s, true));
+    const det = document.createElement("div");
+    det.className = "wrf-item-detail";
+    det.style.display = "none";
+    wrap.appendChild(row); wrap.appendChild(det);
+    s.row = row; s.wrap = wrap; s.detailEl = det;
+    listEl.appendChild(wrap);
+  });
+
+  map.fitBounds(L.latLngBounds(STATIONS.map(s => [s.lat, s.lon])).pad(0.15));
+
+  setTimeout(() => { map.invalidateSize(); }, 300);
+
+  const isMobile = () => window.matchMedia("(max-width: 640px)").matches;
+
+  function select(s, fromList) {
+    if (isMobile()) { toggleMobileDetail(s, fromList); return; }
+    // --- דסקטופ: פאנל צדדי עם גרף + טבלה ---
+    if (selected && selected.row) selected.row.classList.remove("is-sel");
+    selected = s;
+    if (s.row) {
+      s.row.classList.add("is-sel");
+      if (fromList !== true) s.row.scrollIntoView({block:"nearest", behavior:"smooth"});
+    }
+    map.flyTo([s.lat, s.lon], Math.max(map.getZoom(), 10), {duration:.5});
+    openDetail(s);
+  }
+
+  // --- מובייל: לחיצה על תחנה פותחת טבלה מתחת לשם (ללא גרף) ---
+  let mobileOpen = null;
+  function toggleMobileDetail(s, fromList) {
+    if (mobileOpen === s) {
+      s.detailEl.style.display = "none";
+      s.row.classList.remove("is-sel");
+      mobileOpen = null;
+      return;
+    }
+    if (mobileOpen) { mobileOpen.detailEl.style.display = "none"; mobileOpen.row.classList.remove("is-sel"); }
+    mobileOpen = s;
+    s.row.classList.add("is-sel");
+    s.detailEl.style.display = "block";
+    s.detailEl.innerHTML = '<div class="wrf-m-msg">טוען…</div>';
+    if (fromList !== true) s.row.scrollIntoView({block:"nearest", behavior:"smooth"});
+    map.setView([s.lat, s.lon], Math.max(map.getZoom(), 10));
+
+    const jobs = [];
+    if (s.model) jobs.push(load(PREFIX + s.f + ".csv", "Forecast"));
+    if (s.obs)   jobs.push(load(PREFIX + s.f + "_wind_station.csv", "Observed"));
+    if (!jobs.length) { s.detailEl.innerHTML = '<div class="wrf-m-msg">אין נתונים לתחנה זו.</div>'; return; }
+
+    Promise.all(jobs).then((sets) => {
+      if (mobileOpen !== s) return;               // המשתמש עבר לתחנה אחרת
+      const ok = sets.filter(Boolean);
+      if (!ok.length) { s.detailEl.innerHTML = '<div class="wrf-m-msg">לא הצלחתי לקרוא את הנתונים.</div>'; return; }
+      s.detailEl.innerHTML = buildWindguruTableHTML(ok[0]);
+    });
+  }
+
+  function openDetail(s) {
+    $("wrf-detail").style.display = "flex";
+    $("wrf-d-name").textContent = s.name;
+    $("wrf-d-sub").textContent = s.lat.toFixed(4)+", "+s.lon.toFixed(4)
+      + (s.conf === "chk" ? "  ·  location estimated" : "");
+    $("wrf-d-msg").textContent = "";
+    $("wrf-d-table-wrap").innerHTML = "";
+    if (chart) { chart.destroy(); chart = null; }
+
+    const jobs = [];
+    if (s.model) jobs.push(load(PREFIX + s.f + ".csv", "Forecast"));
+    if (s.obs)   jobs.push(load(PREFIX + s.f + "_wind_station.csv", "Observed"));
+
+    if (!jobs.length) {
+      $("wrf-d-msg").textContent = "No data files configured for this station.";
+      return;
+    }
+
+    $("wrf-d-msg").textContent = "Loading…";
+    Promise.all(jobs).then((sets) => {
+      const ok = sets.filter(Boolean);
+      if (!ok.length) { $("wrf-d-msg").textContent = "Couldn't read the data files for this station."; return; }
+      $("wrf-d-msg").textContent = "";
+      drawChart(ok);
+      drawWindguruTable(ok[0]);
+    });
+  }
+
+  function load(fname, tag) {
+    return new Promise((res) => {
+      const requestUrl = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname);
+
+      fetch(requestUrl)
+        .then(response => {
+          if (!response.ok) throw new Error("HTTP error " + response.status);
+          return response.text();
+        })
+        .then(csvText => {
+          if (csvText.startsWith("Error")) return res(null);
+          Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (r) => {
+              const rows = r.data, cols = r.meta.fields || [];
+              if (!rows.length || !cols.length) return res(null);
+
+              // מיפוי לפי מיקום עמודה (הסדר בקובץ: Date/Time, Wind, Dir, Gusts)
+              // זה יציב גם כששמות העמודות מוזרים/מספריים.
+              const xkey    = cols[0];
+              const windCol = cols[1];
+              const dirCol  = cols[2] || null;
+              const gustCol = cols[3] || null;
+
+              const numCol = (c) => c ? rows.map(v => parseFloat(v[c])) : null;
+              const hasNums = (arr) => arr && arr.some(n => !isNaN(n));
+
+              const speedArr = numCol(windCol);
+              const dirArr   = numCol(dirCol);
+              const gustArr  = numCol(gustCol);
+
+              res({
+                tag,
+                labels: rows.map(v => v[xkey]),
+                speed: speedArr,
+                gust: hasNums(gustArr) ? gustArr : null,
+                dir:  hasNums(dirArr)  ? dirArr  : null
+              });
+            }
+          });
+        })
+        .catch(() => res(null));
+    });
+  }
+
+  function drawChart(sets) {
+    const colors = { Forecast:"#1273b8", Observed:"#e0552e" };
+    const labels = sets[0].labels;
+    const ds = sets.map((s) => ({
+      label: s.tag + (s.gust ? " (Gusts)" : " (Wind)"),
+      data: s.gust || s.speed,
+      borderColor: colors[s.tag] || "#5b7186",
+      backgroundColor: "transparent",
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: .25
+    }));
+
+    chart = new Chart($("wrf-canvas"), {
+      type: "line",
+      data: { labels, datasets: ds },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { labels: { boxWidth: 10, font: { size: 11 } } }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
+          y: { ticks: { font: { size: 10 } }, grid: { color: "#eef2f6" } }
+        }
+      }
+    });
+  }
+
+  function drawWindguruTable(set) {
+    if (!set) return;
+    $("wrf-d-table-wrap").innerHTML = buildWindguruTableHTML(set);
+  }
+
+  function buildWindguruTableHTML(set) {
+    if (!set) return "";
+
+    // חץ שעף עם הרוח (Windguru): dir = מהיכן הרוח באה, ולכן +180.
+    const arrowCell = (d) => {
+      if (d == null || isNaN(d)) return '<td>-</td>';
+      const rot = ((ARROW_POINTS_DOWNWIND ? d + 180 : d) % 360 + 360) % 360;
+      return '<td><span class="wind-arrow" style="transform:rotate(' + rot + 'deg);" title="'
+        + Math.round(d) + '°">↑</span></td>';
+    };
+
+    let html = '<div class="wg-table-scroll"><table class="wg-table"><thead><tr><th>Time</th>';
+    set.labels.forEach(l => { html += '<th>' + l + '</th>'; });
+    html += '</tr></thead><tbody>';
+
+    // Wind
+    html += '<tr><td class="tag">Wind (kts)</td>';
+    set.speed.forEach(s => { html += '<td>' + (isNaN(s) ? '-' : Math.round(s)) + '</td>'; });
+    html += '</tr>';
+
+    // Dir — חצים, ישר מתחת ל-Wind
+    html += '<tr><td class="tag">Dir</td>';
+    if (set.dir) { set.dir.forEach(d => { html += arrowCell(d); }); }
+    else { set.speed.forEach(() => { html += '<td>-</td>'; }); }
+    html += '</tr>';
+
+    // Gusts
+    if (set.gust) {
+      html += '<tr><td class="tag">Gusts (kts)</td>';
+      set.gust.forEach(g => { html += '<td>' + (isNaN(g) ? '-' : Math.round(g)) + '</td>'; });
+      html += '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  $("wrf-close").addEventListener("click", () => {
+    $("wrf-detail").style.display = "none";
+    if (selected && selected.row) selected.row.classList.remove("is-sel");
+    selected = null;
+  });
+
+  $("wrf-search").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    let shown = 0;
+    STATIONS.forEach((s) => {
+      const hit = !q || s.name.toLowerCase().includes(q);
+      s.wrap.style.display = hit ? "" : "none";
+      const on = map.hasLayer(s.marker);
+      if (hit && !on) s.marker.addTo(map);
+      if (!hit && on) map.removeLayer(s.marker);
+      if (hit) shown++;
+    });
+    countEl.textContent = shown + " of " + STATIONS.length + " stations";
+  });
+
+  countEl.textContent = STATIONS.length + " stations";
+}
+
+// ===== אתחול כל הרכיבים (כולם גלויים, אחד מתחת לשני) =====
+(function () {
+  [initGo, initForecast, initLive, initStations].forEach(function (fn) {
+    try { fn(); } catch (e) { console.error(e); }
+  });
+  // תיקון גודל מפות אחרי הרינדור
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
+})();
+</script>
