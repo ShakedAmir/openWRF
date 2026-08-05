@@ -550,8 +550,13 @@ function initGo() {
         diff = tTz - tAv;
         prob = probFromDiff(diff);
         const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
-        // שעת המדידה (מהחותמת שחוזרת מ-IMS)
-        const mt = (tzJ && tzJ.time ? tzJ.time : (avJ && avJ.time ? avJ.time : "")).substr(11, 5);
+        // שעת המדידה: IMS מחזיר LST (שעון חורף); בקיץ (+03:00) מוסיפים שעה לשעה המקומית האמיתית
+        const rawTime = (tzJ && tzJ.time) ? tzJ.time : ((avJ && avJ.time) ? avJ.time : "");
+        let mt = rawTime.substr(11, 5);
+        if (rawTime.indexOf("+03:00") !== -1 && mt) {
+          const hh = (parseInt(mt.substr(0, 2), 10) + 1) % 24;
+          mt = (hh < 10 ? "0" + hh : hh) + mt.substr(2);   // 09:30 → 10:30
+        }
         c3 = { state, title: c3.title,
                val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
                     "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" +
