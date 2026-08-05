@@ -427,8 +427,27 @@
 	}
 
 </style>
-
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+// IMS מחזיר את חותמת הזמן לפי שעון חורף קבוע (LST) גם בקיץ.
+// כשה-offset בחותמת הוא +03:00 (שעון קיץ) השעה הרשומה נמוכה בשעה מהשעון האמיתי — יש להוסיף שעה.
+// בשעון חורף (+02:00) החותמת כבר נכונה ואין צורך בתיקון.
+// IMS מחזיר מהירות/גאסט רוח במטר לשנייה (m/s), לא בקשרים — יש להמיר.
+const MS_TO_KT = 1.943844;
+function msToKts(v) {
+  return (v == null || isNaN(v)) ? null : v * MS_TO_KT;
+}
+
+function imsLocalTime(dt) {
+  if (!dt) return "";
+  let hm = dt.substr(11, 5);
+  if (dt.indexOf("+03:00") !== -1) {
+    const hh = (parseInt(hm.substr(0, 2), 10) + 1) % 24;
+    hm = (hh < 10 ? "0" + hh : String(hh)) + hm.substr(2);
+  }
+  return hm;
+}
+
 function initGo() {
 
   // ===== CONFIG =========================================================
@@ -572,13 +591,8 @@ function initGo() {
         diff = tTz - tAv;
         prob = probFromDiff(diff);
         const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
-        // שעת המדידה: IMS מחזיר LST (שעון חורף); בקיץ (+03:00) מוסיפים שעה לשעה המקומית האמיתית
         const rawTime = (tzJ && tzJ.time) ? tzJ.time : ((avJ && avJ.time) ? avJ.time : "");
-        let mt = rawTime.substr(11, 5);
-        if (rawTime.indexOf("+03:00") !== -1 && mt) {
-          const hh = (parseInt(mt.substr(0, 2), 10) + 1) % 24;
-          mt = (hh < 10 ? "0" + hh : hh) + mt.substr(2);   // 09:30 → 10:30
-        }
+        const mt = imsLocalTime(rawTime);
         c3 = { state, title: c3.title,
                val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
                     "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" +
@@ -593,17 +607,13 @@ function initGo() {
         : { state:"unk", title:"סיכוי לגלישה", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
 // --- אינדיקטורים חיים (IMS) ---
-      const kts = (v) => v; // IMS כבר בקשרים
+      const kts = (v) => msToKts(v); // המרת IMS מ-m/s לקשרים
       var extra = [];
 
       // מרום גולן — רמז בוקר (גאסט ≥ 14 קשר)
       if (mgAvgData && mgAvgData.ok) {
-		  var mgAvg = mgAvgData.avg;
-		  var mgTime = new Date(mgAvgData.last).toLocaleTimeString("he-IL", {
-			hour:"2-digit",
-			minute:"2-digit",
-			timeZone:"Asia/Jerusalem"
-		  });
+		  var mgAvg = msToKts(mgAvgData.avg);
+		  var mgTime = imsLocalTime(mgAvgData.last);
 
 		  extra.push({
 			state: mgAvg >= 14 ? "pass" : "warn",
@@ -626,7 +636,7 @@ function initGo() {
         extra.push({
           state: bzG >= 17.5 ? "pass" : "warn",
           title: "בית ציידה (דיימונד)",
-          val: Math.round(bzG) + " קשר · ≥17.5 = רוח" + (bz.time ? " · " + bz.time.substr(11,5) : "")
+          val: Math.round(bzG) + " קשר · ≥17.5 = רוח" + (bz.time ? " · " + imsLocalTime(bz.time) : "")
         });
       }
 
@@ -793,7 +803,7 @@ function initForecast() {
 
 function initLive() {
 
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwAM44xZxQn7Nq6E5c9kGsrorxTUWQCDWsT9Z544JF4vhx7mNw7HmLRdYaegbbfU059/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyn5oTGZyQ1tR1_8VjNwpC4siMkjb0S--f6XVVLscTw07tmlepEBJ24Y00gfqE6BYiWdw/exec";
 
   // תחנות חוף + כנרת (id, שם, קואורדינטות מ-IMS)
   const STATIONS = [
@@ -821,13 +831,53 @@ function initLive() {
     [14,"#b6e34a"],[17,"#f2e13d"],[20,"#f2a93d"],[24,"#ec5e3a"],
     [28,"#d93030"],[34,"#a02694"]
   ];
-  const kts = (v) => v;
+  const kts = (v) => msToKts(v);
   function colorFor(k) {
     if (k == null) return "#cbd5e1";
     let c = SCALE[0][1];
     for (const [t, col] of SCALE) if (k >= t) c = col;
     return c;
   }
+  
+  function drawGustChart(arr, id, popup) {
+	  const el = popup._contentNode.querySelector("#gustChart" + id);
+	  if (!el) return;
+
+	  arr = arr.filter(x => x.gust != null);
+
+	  if (el.chart) el.chart.destroy();
+
+	  const labels = arr.map(x => imsLocalTime(x.time));
+	  const data = arr.map(x => msToKts(x.gust));
+
+	  el.chart = new Chart(el, {
+		type: "line",
+		data: {
+		  labels: labels,
+		  datasets: [{
+			label: "גאסטים היום",
+			data: data,
+			borderColor: "#0077cc",
+			backgroundColor: "rgba(0,119,204,0.2)",
+			tension: 0.3
+		  }]
+		},
+		options: {
+		  scales: {
+			y: { beginAtZero: true }
+		  }
+		}
+	  });
+	}
+
+
+  
+  function fetchGustDay(id) {
+	  return fetch(APPS_SCRIPT_URL + "?gustday=" + id)
+		.then(r => r.json())
+		.catch(() => []);
+	}
+
 
   const $ = (id) => document.getElementById(id);
   const map = L.map($("w-map"), { scrollWheelZoom:false });
@@ -868,13 +918,39 @@ function initLive() {
       const icon = L.divIcon({ html, className:"", iconSize:[34,34], iconAnchor:[17,17] });
       const mk = L.marker([s.lat, s.lon], { icon })
         .addTo(map)
-        .bindPopup('<b>'+s.name+'</b><br>גאסט: '+gTxt+' קשר' +
-                   (dir!=null ? '<br>כיוון: '+Math.round(dir)+'°' : '') +
-                   (d&&d.time ? '<br>'+d.time.substr(11,5) : '<br>אין נתון'));
+        .bindPopup(
+			  '<b>'+s.name+'</b><br>גאסט: '+gTxt+' קשר' +
+			  (dir!=null ? '<br>כיוון: '+Math.round(dir)+'°' : '') +
+			  (d&&d.time ? '<br>'+imsLocalTime(d.time) : '<br>אין נתון') +
+			  '<br><canvas id="gustChart'+s.id+'" width="260" height="120"></canvas>'
+			)
+		mk.on("popupopen", function(e) {
+			  const popup = e.popup;   // ⭐ זה הפופ־אפ האמיתי של Leaflet
+
+			  setTimeout(() => {
+				const el = popup._contentNode.querySelector("#gustChart" + s.id);
+
+				if (!el) {
+				  console.warn("Canvas לא נמצא עדיין, מנסה שוב...");
+				  setTimeout(() => {
+					const el2 = popup._contentNode.querySelector("#gustChart" + s.id);
+					if (el2) {
+					  fetchGustDay(s.id).then(arr => drawGustChart(arr, s.id, popup));
+					}
+				  }, 150);
+				  return;
+				}
+
+				fetchGustDay(s.id).then(arr => drawGustChart(arr, s.id, popup));
+			  }, 50);
+			});
+
+
+
       markers.push(mk);
     });
     $("w-foot").textContent = latest
-      ? ("עודכן " + latest.substr(11,5) + " · " + live + "/" + STATIONS.length + " תחנות פעילות")
+      ? ("עודכן " + imsLocalTime(latest) + " · " + live + "/" + STATIONS.length + " תחנות פעילות")
       : "אין נתונים כרגע";
   }
 
@@ -895,7 +971,7 @@ function initLive() {
 
 function initStations() {
 
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwAM44xZxQn7Nq6E5c9kGsrorxTUWQCDWsT9Z544JF4vhx7mNw7HmLRdYaegbbfU059/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby0k1iGd_P-AEo7pBMnuFV8Z_Dt16MQcTRwxP-Lrtbjg9hSfcAXc4uk-mxZCYT0NZkLNQ/exec";
 
   // אם החצים יוצאים הפוכים, שנה ל-false
   const ARROW_POINTS_DOWNWIND = true;
