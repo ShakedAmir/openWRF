@@ -459,6 +459,12 @@ function initGo() {
     gustFile:   "18z_1km_Kineret_Diamond.csv",
     gustMinKts: 20,
     tempDiffMin: 4,
+    // רוח החוף בקרית ים בדר"כ מתחילה בין 10:00-14:00; אם אין גאסט משמעותי בחלון הזה,
+    // הסיכוי לרוח טובה בכנרת יורד (ר' coastalPenalty למטה)
+    coastalFile: "18z_1km_Kiryat_Yam.csv",
+    coastalWindow: [10, 14],   // כולל את שעה 14 עצמה
+    coastalMinGustKts: 8,      // גאסט מינימלי שנחשב "יש רוח ים" (נבדק מול נתוני אמת)
+    coastalPenalty: 0.5,       // מכפיל הסיכוי כשאין רוח בים בחלון השעות
     // טבלת סיכוי: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
     ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
   };
@@ -490,6 +496,30 @@ function initGo() {
         const c = lines[i].split(",");
         const g = parseFloat(c[3]);           // עמודה 4 = Gusts
         if (!isNaN(g) && g > max) { max = g; at = c[0]; }
+      }
+      return isFinite(max) ? { max, at } : null;
+    }).catch(() => null);
+  }
+
+  // גאסט מקסימלי בקובץ ה-WRF של תחנת חוף, מוגבל להיום ולחלון שעות נתון [fromH, toH)
+  function fetchCoastGustWindow(fname, fromH, toH) {
+    const url = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname);
+    return fetch(url).then(r => r.text()).then(txt => {
+      if (!txt || txt.startsWith("Error")) return null;
+      const lines = txt.trim().split(/\r?\n/);
+      const d = new Date();
+      const today =
+        d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", month:"2-digit" }) +
+        d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", day:"2-digit" });
+      let max = -Infinity, at = "";
+      for (let i = 1; i < lines.length; i++) {
+        const c = lines[i].split(",");
+        const key = c[0] || "";
+        if (!key.startsWith(today)) continue;
+        const hh = parseInt(key.split("-")[1], 10) / 100 | 0; // "HHMM" -> HH
+        if (isNaN(hh) || hh < fromH || hh > toH) continue;
+        const g = parseFloat(c[3]);
+        if (!isNaN(g) && g > max) { max = g; at = key; }
       }
       return isFinite(max) ? { max, at } : null;
     }).catch(() => null);
@@ -560,17 +590,36 @@ function initGo() {
       fetchIMS("zemah"),
       fetchIMS("avnei"),
       fetchWind("10,6"),
-	  fetchWSmax10() 
-    ]).then(([medJ, gust, tzJ, avJ, liveWind, mgAvgData]) => {
-      // --- תנאי 1: כיוון רוח בים ---
+	  fetchWSmax10(),
+      fetchCoastGustWindow(CFG.coastalFile, CFG.coastalWindow[0], CFG.coastalWindow[1])
+    ]).then(([medJ, gust, tzJ, avJ, liveWind, mgAvgData, coastGust]) => {
+      // --- תנאי 1: כיוון רוח בים (רלוונטי רק עד 13:00 — הרוח מגיעה לכנרת כ-4 שעות אחרי) ---
+      const ilHour = parseInt(new Date().toLocaleString("en-GB",
+        { timeZone:"Asia/Jerusalem", hour12:false }).split(", ")[1].split(":")[0], 10);
+      const c1Relevant = ilHour < 13;
       let c1 = { state:"unk", title:"רוח דרומית/מערבית בים התיכון", val:"אין נתון" };
       const wdir = medJ && medJ.current ? medJ.current.wind_direction_10m : null;
       const wspd = medJ && medJ.current ? medJ.current.wind_speed_10m : null;
-      if (wdir != null) {
+      const wdirTxt = wdir != null
+        ? ("כיוון " + Math.round(wdir) + "° (" + compass(wdir) + ")" + (wspd != null ? " · " + Math.round(wspd) + " קשר" : ""))
+        : null;
+      if (!c1Relevant) {
+        c1 = { state:"unk", title:"רוח דרומית/מערבית בים התיכון (לא רלוונטי אחרי 13:00)",
+               val: "הרוח מהחוף מגיעה לכנרת כ-4 שעות אחרי" + (wdirTxt ? " · " + wdirTxt : "") };
+      } else if (wdir != null) {
         const ok = inRange(wdir, CFG.favDir);
-        c1 = { state: ok ? "pass" : "fail", title: c1.title,
-               val: "כיוון " + Math.round(wdir) + "° (" + compass(wdir) + ")" +
-                    (wspd != null ? " · " + Math.round(wspd) + " קשר" : "") };
+        c1 = { state: ok ? "pass" : "fail", title: c1.title, val: wdirTxt };
+      }
+
+      // --- רוח/גאסט בים התיכון בחלון 10:00–14:00 (קרית ים, WRF) ---
+      // אם אין גאסט משמעותי בחלון הזה, הסיכוי לרוח טובה בכנרת יורד (ר' coastalPenalty)
+      const coastWindowTxt = CFG.coastalWindow[0] + ":00–" + CFG.coastalWindow[1] + ":00";
+      let c1b = { state:"unk", title:"גאסט בים התיכון " + coastWindowTxt + " (קרית ים, WRF)", val:"אין נתון" };
+      const coastHasWind = coastGust ? coastGust.max >= CFG.coastalMinGustKts : null;
+      if (coastGust) {
+        c1b = { state: coastHasWind ? "pass" : "warn", title: c1b.title,
+                val: "מקסימום " + Math.round(coastGust.max) + " קשר" + (coastGust.at ? " · " + coastGust.at : "") +
+                     (coastHasWind ? "" : " · אין רוח משמעותית בחלון") };
       }
 
       // --- תנאי 2: גאסטים WRF ---
@@ -590,13 +639,15 @@ function initGo() {
       if (tTz != null && tAv != null) {
         diff = tTz - tAv;
         prob = probFromDiff(diff);
+        if (coastHasWind === false) prob *= CFG.coastalPenalty; // אין רוח בים ב-10:00-14:00 → הסיכוי יורד
         const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
         const rawTime = (tzJ && tzJ.time) ? tzJ.time : ((avJ && avJ.time) ? avJ.time : "");
         const mt = imsLocalTime(rawTime);
         c3 = { state, title: c3.title,
                val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
                     "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" +
-                    (mt ? " · מדידת " + mt : "") };
+                    (mt ? " · מדידת " + mt : "") +
+                    (coastHasWind === false ? " (הופחת עקב חוסר רוח בים)" : "") };
       } else if (pending) {
         c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
       }
@@ -641,7 +692,7 @@ function initGo() {
       }
 
       // ציור השורות
-      const rows = [c1, c2, c3, c4].concat(extra);
+      const rows = [c1, c1b, c2, c3, c4].concat(extra);
       $("go-checks").innerHTML = rows.map(r => {
         const [cls, ch] = ICON[r.state] || ICON.unk;
         return '<div class="go-check"><span class="go-ic ' + cls + '">' + ch + '</span>' +
@@ -650,8 +701,9 @@ function initGo() {
       }).join("");
 	  
 // --- הכרעה ---
-      const known = [c1, c2, c3].every(c => c.state !== "unk");
-      const goodAll = c1.state === "pass" && c2.state === "pass" && c3.state === "pass";
+      const decisionChecks = c1Relevant ? [c1, c2, c3] : [c2, c3];
+      const known = decisionChecks.every(c => c.state !== "unk");
+      const goodAll = decisionChecks.every(c => c.state === "pass");
       if (pending) {
         setLight("is-wait", "ממתין ל-10:30", "מדידת הטמפרטורות תתעדכן ~10:45");
       } else if (!known) {
@@ -661,7 +713,7 @@ function initGo() {
           prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "%") : "כל התנאים מתקיימים");
       } else {
         const missing = [];
-        if (c1.state !== "pass") missing.push("רוח");
+        if (c1Relevant && c1.state !== "pass") missing.push("רוח");
         if (c2.state !== "pass") missing.push("גאסטים");
         if (c3.state !== "pass") missing.push("הפרש טמפ׳");
         setLight("is-no", "לא לגלוש", "חסר: " + missing.join(", "));
