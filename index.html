@@ -585,8 +585,8 @@ function initGo() {
         : { state:"unk", title:"סיכוי לגלישה", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
 // --- אינדיקטורים חיים (IMS) ---
-      const kts = (ms) => (ms == null ? null : ms * 1.94384);   // אם הערכים כבר בקשרים, מחק את ההמרה
-      var extra = [];
+		const kts = (v) => v; // IMS כבר בקשרים
+		var extra = [];
 
       // מרום גולן — רמז בוקר (גאסט ≥ 14 קשר)
       var mg = liveWind && liveWind["10"] ? liveWind["10"] : null;
