@@ -452,6 +452,8 @@ function initGo() {
 
   // ===== CONFIG =========================================================
   const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw0RwwAyoHRCePwBTIzPpi1Q06m0ouMOflEdY_d1ubCYt7aPXG-dv26zwxbawH4XTxIAw/exec";
+  // endpoint ה-history (ארכיון/שאילתות טווח תאריכים) — פרוס בנפרד, אותו IMS_TOKEN
+  const HISTORY_URL = "https://script.google.com/macros/s/AKfycbwI76tv6gB-rIXpO7acEzypHG-Nr_Lc5KfE_u_C8HXnyxRMx2cwo8bDJHZ54mTLry5SHw/exec";
 
   const CFG = {
     med:        { lat: 32.40, lon: 34.25 },   // נקודה בים התיכון (כמו Windy של KDI)
@@ -465,6 +467,13 @@ function initGo() {
     coastalWindow: [10, 14],   // כולל את שעה 14 עצמה
     coastalMinGustKts: 8,      // גאסט מינימלי שנחשב "יש רוח ים" (נבדק מול נתוני אמת)
     coastalPenalty: 0.5,       // מכפיל הסיכוי כשאין רוח בים בחלון השעות
+    // חום אזורי קיצוני (כל הגליל/עמק הירדן חם מהרגיל) מרפה את מפל הלחץ הסינופטי הכללי
+    // ומחליש רוח, גם כשההפרש התרמי המקומי (צמח-אבני איתן) תקין. נמדד כסטייה של
+    // טמפ' צמח ב-10:30 מעל הממוצע של 7 הימים הקודמים (לא מול סף קבוע — כי בקיץ בעמק
+    // תמיד חם, השאלה היא האם היום חריג ביחס לאחרונים).
+    heatBaselineDays: 7,
+    heatDeltaMin: 2.0,   // מעלות מעל הממוצע השבועי שנחשב "גל חום"
+    heatPenalty: 0.7,    // מכפיל נוסף לסיכוי בזמן גל חום
     // טבלת סיכוי: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
     ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
   };
@@ -557,6 +566,21 @@ function initGo() {
 		.catch(() => null);
 	}
 
+  // ממוצע טמפ' צמח ב-10:30 (=09:30 בחותמת IMS) על פני N הימים הקודמים (לא כולל היום) —
+  // בסיס להשוואת "האם היום חם באופן חריג" לצורך אינדיקטור חום אזורי
+  function fetchRecentZemahAvg(days) {
+    const fmtIL = d => d.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" }); // YYYY-MM-DD
+    const now = new Date();
+    const toDate = new Date(now); toDate.setDate(toDate.getDate() - 1);
+    const fromDate = new Date(now); fromDate.setDate(fromDate.getDate() - days);
+    const url = HISTORY_URL + "?history=8&from=" + fmtIL(fromDate) + "T00:00:00&to=" + fmtIL(toDate) + "T23:59:59";
+    return fetch(url).then(r => r.json()).then(rows => {
+      if (!Array.isArray(rows)) return null;
+      const vals = rows.filter(r => r.time && r.time.slice(11,16) === "09:30" && typeof r.temp === "number").map(r => r.temp);
+      return vals.length ? vals.reduce((a,b)=>a+b,0) / vals.length : null;
+    }).catch(() => null);
+  }
+
 
   // התאמת פרבולה (least-squares) לטבלת הסיכוי -> אחוז סיכוי לפי הפרש
   const QUAD = fitQuad(CFG.ronen);
@@ -591,8 +615,9 @@ function initGo() {
       fetchIMS("avnei"),
       fetchWind("10,6"),
 	  fetchWSmax10(),
-      fetchCoastGustWindow(CFG.coastalFile, CFG.coastalWindow[0], CFG.coastalWindow[1])
-    ]).then(([medJ, gust, tzJ, avJ, liveWind, mgAvgData, coastGust]) => {
+      fetchCoastGustWindow(CFG.coastalFile, CFG.coastalWindow[0], CFG.coastalWindow[1]),
+      fetchRecentZemahAvg(CFG.heatBaselineDays)
+    ]).then(([medJ, gust, tzJ, avJ, liveWind, mgAvgData, coastGust, recentAvgTemp]) => {
       // --- תנאי 1: כיוון רוח בים (רלוונטי רק עד 13:00 — הרוח מגיעה לכנרת כ-4 שעות אחרי) ---
       const ilHour = parseInt(new Date().toLocaleString("en-GB",
         { timeZone:"Asia/Jerusalem", hour12:false }).split(", ")[1].split(":")[0], 10);
@@ -635,11 +660,27 @@ function initGo() {
       const pending = (tzJ && tzJ.pending) || (avJ && avJ.pending);
       const tTz = tzJ && typeof tzJ.temp === "number" ? tzJ.temp : null;
       const tAv = avJ && typeof avJ.temp === "number" ? avJ.temp : null;
+
+      // --- חום אזורי: טמפ' צמח מול ממוצע 7 הימים האחרונים ---
+      // גל חום אזורי (כל האזור חם מהרגיל, לא רק הפרש מקומי) מרפה את מפל הלחץ הסינופטי
+      // ומחליש רוח גם כשההפרש המקומי תקין. מבוסס על מגמה שנצפתה בנתוני יולי 2026 (מתאם חלש-בינוני,
+      // לא חד-משמעי — ר' יום 28/7 שהיה חם וגם הכי סוער בחודש, אז זו תוספת עדינה בלבד ולא שער חוסם)
+      const heatDelta = (tTz != null && recentAvgTemp != null) ? (tTz - recentAvgTemp) : null;
+      const isHeatWave = heatDelta != null ? heatDelta >= CFG.heatDeltaMin : null;
+      let c3b = { state:"unk", title:"חום אזורי (צמח מול ממוצע " + CFG.heatBaselineDays + " ימים)", val:"אין נתון" };
+      if (heatDelta != null) {
+        c3b = { state: isHeatWave ? "warn" : "pass", title: c3b.title,
+                val: "צמח " + tTz.toFixed(1) + "° · ממוצע " + CFG.heatBaselineDays + " ימים " + recentAvgTemp.toFixed(1) + "°" +
+                     " · סטייה " + (heatDelta>=0?"+":"") + heatDelta.toFixed(1) + "°" +
+                     (isHeatWave ? " · גל חום — ייתכן ריפוי מפל הרוח" : "") };
+      }
+
       let diff = null, prob = null;
       if (tTz != null && tAv != null) {
         diff = tTz - tAv;
         prob = probFromDiff(diff);
         if (coastHasWind === false) prob *= CFG.coastalPenalty; // אין רוח בים ב-10:00-14:00 → הסיכוי יורד
+        if (isHeatWave) prob *= CFG.heatPenalty;                // גל חום אזורי → הסיכוי יורד
         const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
         const rawTime = (tzJ && tzJ.time) ? tzJ.time : ((avJ && avJ.time) ? avJ.time : "");
         const mt = imsLocalTime(rawTime);
@@ -647,7 +688,8 @@ function initGo() {
                val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
                     "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" +
                     (mt ? " · מדידת " + mt : "") +
-                    (coastHasWind === false ? " (הופחת עקב חוסר רוח בים)" : "") };
+                    (coastHasWind === false ? " (הופחת עקב חוסר רוח בים)" : "") +
+                    (isHeatWave ? " (הופחת עקב חום אזורי)" : "") };
       } else if (pending) {
         c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
       }
@@ -692,7 +734,7 @@ function initGo() {
       }
 
       // ציור השורות
-      const rows = [c1, c1b, c2, c3, c4].concat(extra);
+      const rows = [c1, c1b, c2, c3, c3b, c4].concat(extra);
       $("go-checks").innerHTML = rows.map(r => {
         const [cls, ch] = ICON[r.state] || ICON.unk;
         return '<div class="go-check"><span class="go-ic ' + cls + '">' + ch + '</span>' +
