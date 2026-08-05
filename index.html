@@ -880,7 +880,7 @@ function initLive() {
 
 
   const $ = (id) => document.getElementById(id);
-  const map = L.map($("w-map"), { scrollWheelZoom:false });
+  const map = L.map($("w-map"), { scrollWheelZoom:false, keyboard:false });
   L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
     { maxZoom:18, attribution:"© OpenStreetMap · CARTO" }).addTo(map);
   map.fitBounds(L.latLngBounds(STATIONS.map(s => [s.lat, s.lon])).pad(0.12));
@@ -1017,7 +1017,7 @@ function initStations() {
   const nice = (s) => s.replace(/_/g, " ");
   const listEl = $("wrf-list"), countEl = $("wrf-count");
 
-  const map = L.map($("wrf-map"), {scrollWheelZoom:false});
+  const map = L.map($("wrf-map"), {scrollWheelZoom:false, keyboard:false});
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {maxZoom:18, attribution:"© OpenStreetMap"}).addTo(map);
 
