@@ -418,7 +418,7 @@
     #wrf .wg-table th, #wrf .wg-table td{ padding:10px 12px !important; }
     #wrf .wg-table td .wind-arrow{ font-size:18px; }
   }
-	
+  
   @media (max-width:640px){
 	  #wrf #wrf-map{ position:relative !important; inset:auto !important;
 		height:340px !important; width:100% !important; }
@@ -495,6 +495,12 @@ function initGo() {
       })
       .catch(() => null);
   }
+  
+  function fetchWind(ids) {
+    return fetch(APPS_SCRIPT_URL + "?wind=" + ids)
+      .then(r => r.json())
+      .catch(() => null);
+  }
 
   // התאמת פרבולה (least-squares) לטבלת הסיכוי -> אחוז סיכוי לפי הפרש
   const QUAD = fitQuad(CFG.ronen);
@@ -526,8 +532,9 @@ function initGo() {
       omCurrent(CFG.med, "wind_direction_10m,wind_speed_10m"),
       fetchGustMax(),
       fetchIMS("zemah"),
-      fetchIMS("avnei")
-    ]).then(([medJ, gust, tzJ, avJ]) => {
+      fetchIMS("avnei"),
+      fetchWind("10,6")
+    ]).then(([medJ, gust, tzJ, avJ, liveWind]) => {
       // --- תנאי 1: כיוון רוח בים ---
       let c1 = { state:"unk", title:"רוח דרומית/מערבית בים התיכון", val:"אין נתון" };
       const wdir = medJ && medJ.current ? medJ.current.wind_direction_10m : null;
@@ -577,16 +584,40 @@ function initGo() {
         ? { state:"pass", title:"סיכוי לגלישה", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
         : { state:"unk", title:"סיכוי לגלישה", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
+// --- אינדיקטורים חיים (IMS) ---
+      const kts = (ms) => (ms == null ? null : ms * 1.94384);   // אם הערכים כבר בקשרים, מחק את ההמרה
+      var extra = [];
+
+      // מרום גולן — רמז בוקר (גאסט ≥ 14 קשר)
+      var mg = liveWind && liveWind["10"] ? liveWind["10"] : null;
+      var mgG = mg ? kts(mg.gust != null ? mg.gust : mg.ws) : null;
+      extra.push({
+        state: mgG == null ? "unk" : (mgG >= 14 ? "pass" : "warn"),
+        title: "מרום גולן (רמז בוקר)",
+        val: mgG != null ? Math.round(mgG) + " קשר · ≥14 = מבטיח" + (mg.time ? " · " + mg.time.substr(11,5) : "") : "אין נתון"
+      });
+
+      // בית ציידה — פרוקסי דיימונד (רק אם יש נתון תקין)
+      var bz = liveWind && liveWind["6"] ? liveWind["6"] : null;
+      var bzG = bz ? kts(bz.gust != null ? bz.gust : bz.ws) : null;
+      if (bzG != null) {
+        extra.push({
+          state: bzG >= 17.5 ? "pass" : "warn",
+          title: "בית ציידה (דיימונד)",
+          val: Math.round(bzG) + " קשר · ≥17.5 = רוח" + (bz.time ? " · " + bz.time.substr(11,5) : "")
+        });
+      }
+
       // ציור השורות
-      const rows = [c1, c2, c3, c4];
+      const rows = [c1, c2, c3, c4].concat(extra);
       $("go-checks").innerHTML = rows.map(r => {
         const [cls, ch] = ICON[r.state] || ICON.unk;
         return '<div class="go-check"><span class="go-ic ' + cls + '">' + ch + '</span>' +
           '<span class="go-ctext"><span class="go-ctitle">' + r.title + '</span>' +
           '<span class="go-cval">' + r.val + '</span></span></div>';
       }).join("");
-
-      // --- הכרעה ---
+	  
+// --- הכרעה ---
       const known = [c1, c2, c3].every(c => c.state !== "unk");
       const goodAll = c1.state === "pass" && c2.state === "pass" && c3.state === "pass";
       if (pending) {
