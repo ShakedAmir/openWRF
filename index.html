@@ -432,7 +432,7 @@
 function initGo() {
 
   // ===== CONFIG =========================================================
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMBUzgMA0HUqieVXL4FAVB95RiJ462E6OWYLwT5XyYF85Y6Nb-glIkULO-Yv-HN9W-RQ/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw0RwwAyoHRCePwBTIzPpi1Q06m0ouMOflEdY_d1ubCYt7aPXG-dv26zwxbawH4XTxIAw/exec";
 
   const CFG = {
     med:        { lat: 32.40, lon: 34.25 },   // נקודה בים התיכון (כמו Windy של KDI)
@@ -501,6 +501,13 @@ function initGo() {
       .then(r => r.json())
       .catch(() => null);
   }
+  
+  function fetchWSmax10() {
+	  return fetch(APPS_SCRIPT_URL + "?wsmax10=1")
+		.then(r => r.json())
+		.catch(() => null);
+	}
+
 
   // התאמת פרבולה (least-squares) לטבלת הסיכוי -> אחוז סיכוי לפי הפרש
   const QUAD = fitQuad(CFG.ronen);
@@ -533,8 +540,9 @@ function initGo() {
       fetchGustMax(),
       fetchIMS("zemah"),
       fetchIMS("avnei"),
-      fetchWind("10,6")
-    ]).then(([medJ, gust, tzJ, avJ, liveWind]) => {
+      fetchWind("10,6"),
+	  fetchWSmax10() 
+    ]).then(([medJ, gust, tzJ, avJ, liveWind, mgAvgData]) => {
       // --- תנאי 1: כיוון רוח בים ---
       let c1 = { state:"unk", title:"רוח דרומית/מערבית בים התיכון", val:"אין נתון" };
       const wdir = medJ && medJ.current ? medJ.current.wind_direction_10m : null;
@@ -585,17 +593,31 @@ function initGo() {
         : { state:"unk", title:"סיכוי לגלישה", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
 // --- אינדיקטורים חיים (IMS) ---
-		const kts = (v) => v; // IMS כבר בקשרים
-		var extra = [];
+      const kts = (v) => v; // IMS כבר בקשרים
+      var extra = [];
 
       // מרום גולן — רמז בוקר (גאסט ≥ 14 קשר)
-      var mg = liveWind && liveWind["10"] ? liveWind["10"] : null;
-      var mgG = mg ? kts(mg.gust != null ? mg.gust : mg.ws) : null;
-      extra.push({
-        state: mgG == null ? "unk" : (mgG >= 14 ? "pass" : "warn"),
-        title: "מרום גולן (רמז בוקר)",
-        val: mgG != null ? Math.round(mgG) + " קשר · ≥14 = מבטיח" + (mg.time ? " · " + mg.time.substr(11,5) : "") : "אין נתון"
-      });
+      if (mgAvgData && mgAvgData.ok) {
+		  var mgAvg = mgAvgData.avg;
+		  var mgTime = new Date(mgAvgData.last).toLocaleTimeString("he-IL", {
+			hour:"2-digit",
+			minute:"2-digit",
+			timeZone:"Asia/Jerusalem"
+		  });
+
+		  extra.push({
+			state: mgAvg >= 14 ? "pass" : "warn",
+			title: "מרום גולן (רמז בוקר)",
+			val: Math.round(mgAvg) + " קשר · ≥14 = מבטיח · " + mgTime
+		  });
+		} else {
+		  extra.push({
+			state: "unk",
+			title: "מרום גולן (רמז בוקר)",
+			val: "אין נתון"
+		  });
+		}
+
 
       // בית ציידה — פרוקסי דיימונד (רק אם יש נתון תקין)
       var bz = liveWind && liveWind["6"] ? liveWind["6"] : null;
