@@ -136,7 +136,7 @@
   #go .go-refresh:hover{background:#f1f5f9}
   #go .go-time{font-family:var(--mono);font-size:11px;color:var(--muted)}
 
-  /* ===== כרטיס תחזית ===== */
+/* ===== כרטיס תחזית ===== */
   #fc{
     --line:#e3e9ef;--ink:#0f2436;--muted:#5b7186;--panel:#fff;--accent:#2b74b8;
     --mono:ui-monospace,"SF Mono",Menlo,monospace;
@@ -152,27 +152,39 @@
     padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
   #fc .fc-refresh:hover{background:rgba(255,255,255,.4)}
 
-  #fc .fc-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:0}
-  #fc .fc-col{padding:14px 8px;text-align:center;border-left:1px solid var(--line)}
-  #fc .fc-col:last-child{border-left:none}
-  #fc .fc-spot{font-size:14px;font-weight:700;color:var(--accent);min-height:36px}
-  #fc .fc-sq{width:26px;height:26px;border-radius:5px;margin:14px auto 6px;
+  /* שורה אחת לכל ספוט */
+  #fc .fc-grid{display:block}
+  #fc .fc-col{padding:12px 16px;border-bottom:1px solid var(--line)}
+  #fc .fc-col:last-child{border-bottom:none}
+  #fc .fc-row{display:flex;align-items:center;gap:12px}
+  #fc .fc-spot{flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--accent);
+    text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #fc .fc-sq{flex:none;width:28px;height:28px;border-radius:5px;
     box-shadow:0 1px 3px rgba(0,0,0,.25)}
-  #fc .fc-gust{font-family:var(--mono);font-size:17px;font-weight:800}
-  #fc .fc-arrow{font-size:20px;margin-top:6px;line-height:1}
-  #fc .fc-dir{font-family:var(--mono);font-size:11px;color:var(--muted)}
-  #fc .fc-win{margin-top:10px;font-size:13px}
-  #fc .fc-win b{font-size:16px}
-  #fc .fc-label{font-size:10px;color:var(--muted);margin-top:2px}
-  #fc .fc-na{color:#9aa8b6}
+  #fc .fc-gust{flex:none;width:42px;text-align:center;font-family:var(--mono);
+    font-size:20px;font-weight:800}
+  #fc .fc-dircell{flex:none;display:flex;flex-direction:column;align-items:center;width:66px}
+  #fc .fc-arrow{font-size:20px;line-height:1}
+  #fc .fc-dir{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap}
 
+  /* שורת חלון / קשר / שעה — תמיד גלויה, מיושרת לימין */
+  #fc .fc-winrow{display:flex;flex-wrap:wrap;gap:3px 12px;align-items:baseline;
+    justify-content:flex-start;margin-top:8px;font-size:13px;color:var(--muted)}
+  #fc .fc-winrow b{font-size:15px;color:var(--ink)}
+  #fc .fc-winrow span + span::before{content:"·";margin-left:12px}
+
+  #fc .fc-na{color:#9aa8b6}
   #fc .fc-foot{padding:8px 16px;background:#f7f9fb;border-top:1px solid var(--line);
     font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center}
-  @media (max-width:640px){
-    #fc .fc-grid{grid-template-columns:repeat(2,1fr)}
-    #fc .fc-col:nth-child(odd){border-left:1px solid var(--line)}
-  }
 
+  @media (max-width:640px){
+    #fc .fc-spot{font-size:17px}
+    #fc .fc-gust{font-size:22px}
+    #fc .fc-winrow{font-size:14px}
+    #fc .fc-winrow b{font-size:17px}
+  }
+  
+  
   /* ===== מפת רוח חיה ===== */
   #wind{
     --line:#e3e9ef;--ink:#0f2436;--muted:#5b7186;--panel:#fff;
@@ -676,20 +688,23 @@ function initForecast() {
 		const g = d && d.gust != null ? Math.round(d.gust) : null;
 		const win = d ? d.window : 0;
 		const dir = d && d.dir != null && !isNaN(d.dir) ? d.dir : null;
-		const start = d && d.start ? d.start.split("-")[1].replace(/(\d{2})(\d{2})/, "$1:$2"): null;// רק השעה (HHMM)
-		const arrow = dir != null
-		  ? '<div class="fc-arrow" style="transform:rotate('+((dir+180)%360)+'deg)">↑</div>'
-			+ '<div class="fc-dir">'+Math.round(dir)+'° '+compass(dir)+'</div>'
-		  : '<div class="fc-arrow fc-na">–</div>';
+		const start = d && d.start ? d.start.split("-")[1].replace(/(\d{2})(\d{2})/, "$1:$2") : null;
+		const arrowHtml = dir != null
+		  ? '<span class="fc-arrow" style="transform:rotate('+((dir+180)%360)+'deg)">↑</span>'
+		  : '<span class="fc-arrow fc-na">–</span>';
+		const dirTxt = dir != null ? Math.round(dir)+'° '+compass(dir) : '';
 		return '<div class="fc-col">' +
-		  '<div class="fc-spot">'+s.name+'</div>' +
-		  '<div class="fc-sq" style="background:'+colorFor(g)+'"></div>' +
-		  '<div class="fc-gust'+(g==null?' fc-na':'')+'">'+(g!=null?g:'–')+'</div>' +
-		  '<div class="fc-label">שיא גאסט (קשר)</div>' +
-		  arrow +
-		  '<div class="fc-win">חלון: <b>'+(win>0?win:'0')+'</b> ש׳</div>' +
-		  '<div class="fc-label">מעל '+WINDOW_KTS+' קשר</div>' +
-		  (start ? '<div class="fc-label">משעה: '+start+'</div>' : '') +
+		  '<div class="fc-row">' +
+			'<div class="fc-spot">'+s.name+'</div>' +
+			'<div class="fc-sq" style="background:'+colorFor(g)+'"></div>' +
+			'<div class="fc-gust'+(g==null?' fc-na':'')+'">'+(g!=null?g:'–')+'</div>' +
+			'<div class="fc-dircell">'+arrowHtml+'<span class="fc-dir">'+dirTxt+'</span></div>' +
+		  '</div>' +
+		  '<div class="fc-winrow">' +
+			'<span>חלון: <b>'+(win>0?win:'0')+'</b> ש׳</span>' +
+			'<span>מעל '+WINDOW_KTS+' קשר</span>' +
+			(start ? '<span>משעה '+start+'</span>' : '') +
+		  '</div>' +
 		'</div>';
 	  }).join("");
 	}
