@@ -11,8 +11,8 @@
 <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
-<div id="kdi" dir="rtl">
-  <section class="kdi-block pad"><div id="go" dir="rtl">
+<div id="dmd" dir="rtl">
+  <section class="dmd-block pad"><div id="go" dir="rtl">
   <div class="go-spot">🪁 גלישת קייט · דיימונד כנרת</div>
   <div class="go-light" id="go-light">
     <div class="go-lamp" id="go-lamp"></div>
@@ -27,7 +27,7 @@
     <span class="go-time" id="go-time"></span>
   </div>
 </div></section>
-  <section class="kdi-block pad"><div id="fc" dir="rtl">
+  <section class="dmd-block pad"><div id="fc" dir="rtl">
   <div class="fc-head">
     <div class="fc-title">תחזית רוח <span id="fc-date"></span></div>
     <button id="fc-refresh" class="fc-refresh">רענן</button>
@@ -35,7 +35,7 @@
   <div class="fc-grid" id="fc-grid"></div>
   <div class="fc-foot" id="fc-foot">טוען…</div>
 </div></section>
-  <section class="kdi-block"><div id="wrf">
+  <section class="dmd-block"><div id="wrf">
   <div class="wrf-head">
     <div class="wrf-title">openWRF <span class="wrf-sep">/</span> wind stations</div>
     <div class="wrf-count" id="wrf-count"></div>
@@ -63,7 +63,7 @@
     </div>
   </div>
 </div></section>
-  <section class="kdi-block"><div id="wind">
+  <section class="dmd-block"><div id="wind">
   <div class="w-head">
     <div class="w-title">רוח חיה <span class="w-sep">·</span> IMS</div>
     <div class="w-legend" id="w-legend"></div>
@@ -76,14 +76,14 @@
 
 <style>
   /* ===== מעטפת: ארבעה רכיבים אחד מתחת לשני ===== */
-  #kdi{ font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Hebrew",sans-serif;
+  #dmd{ font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Hebrew",sans-serif;
     max-width:900px;margin:0 auto; }
-  #kdi *{ box-sizing:border-box; }
-  #kdi .kdi-block{ margin-bottom:18px; }
-  #kdi .kdi-block:last-child{ margin-bottom:0; }
-  #kdi .kdi-block.pad{ padding:0; }
+  #dmd *{ box-sizing:border-box; }
+  #dmd .dmd-block{ margin-bottom:18px; }
+  #dmd .dmd-block:last-child{ margin-bottom:0; }
+  #dmd .dmd-block.pad{ padding:0; }
   @media (max-width:640px){
-    #kdi .kdi-block{ margin-bottom:14px; }
+    #dmd .dmd-block{ margin-bottom:14px; }
   }
 
   /* ===== רמזור ===== */
@@ -316,8 +316,8 @@
   /* ===== חסימת גלילה צידית בנייד ===== */
   @media (max-width:640px){
     /* המעטפת לא חורגת מהמסך ואין גלילה אופקית ברמת העמוד */
-    #kdi{ max-width:100%; overflow-x:hidden; }
-    #kdi .kdi-block{ max-width:100%; overflow-x:hidden; }
+    #dmd{ max-width:100%; overflow-x:hidden; }
+    #dmd .dmd-block{ max-width:100%; overflow-x:hidden; }
 
     /* אף רכיב לא רחב מהמסך (מבטל max-width קבועים כמו 440/760) */
     #go, #fc, #wrf, #wind{ max-width:100% !important; width:100%; }
@@ -336,21 +336,21 @@
 
   /* ===== חסימת גלילה צידית (בלי לשבור את Leaflet) ===== */
   html, body{ overflow-x:hidden !important; max-width:100%; }
-  #kdi{ overflow-x:hidden; max-width:100%; }
-  #kdi > .kdi-block{ max-width:100%; }
+  #dmd{ overflow-x:hidden; max-width:100%; }
+  #dmd > .dmd-block{ max-width:100%; }
   /* חשוב: להחריג את Leaflet — אחרת אריחי מפה וסמנים (wind-bubble) נשברים */
-  #kdi .leaflet-container img,
-  #kdi .leaflet-tile,
-  #kdi .leaflet-marker-icon,
-  #kdi .leaflet-marker-pane *,
-  #kdi .leaflet-popup-pane *{ max-width:none !important; }
+  #dmd .leaflet-container img,
+  #dmd .leaflet-tile,
+  #dmd .leaflet-marker-icon,
+  #dmd .leaflet-marker-pane *,
+  #dmd .leaflet-popup-pane *{ max-width:none !important; }
   /* היחיד שמותר לו לגלול לרוחב הוא גוף הטבלה הרחבה — בתוך עצמו בלבד */
-  #kdi .wg-table-scroll{ max-width:100%; overflow-x:auto; }
+  #dmd .wg-table-scroll{ max-width:100%; overflow-x:auto; }
 
 
   /* ========= שיפורי מובייל מקיפים (נוחות מגע) ========= */
   @media (max-width:640px){
-    #kdi{ padding:0 4px; }
+    #dmd{ padding:0 4px; }
 
     /* כפתורים גדולים למגע בכל הרכיבים */
     #go .go-refresh, #fc .fc-refresh, #wind .w-refresh, #wrf .wrf-search{
