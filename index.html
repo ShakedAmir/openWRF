@@ -743,7 +743,8 @@ function initGo() {
       }).join("");
 	  
 // --- הכרעה ---
-      const decisionChecks = c1Relevant ? [c1, c2, c3] : [c2, c3];
+      // c3 (הפרש טמפ') כבר לא שער חוסם — רק משפיע על אחוז הסיכוי (כמו c1b וחום אזורי)
+      const decisionChecks = c1Relevant ? [c1, c2] : [c2];
       const known = decisionChecks.every(c => c.state !== "unk");
       const goodAll = decisionChecks.every(c => c.state === "pass");
       if (pending) {
@@ -757,7 +758,6 @@ function initGo() {
         const missing = [];
         if (c1Relevant && c1.state !== "pass") missing.push("רוח");
         if (c2.state !== "pass") missing.push("גאסטים");
-        if (c3.state !== "pass") missing.push("הפרש טמפ׳");
         setLight("is-no", "לא לגלוש", "חסר: " + missing.join(", "));
       }
 
