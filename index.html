@@ -91,6 +91,7 @@
     --bg:#ffffff;--ink:#0f2436;--muted:#5b7186;--line:#e3e9ef;
     --green:#1f9d55;--green-soft:#e6f6ec;--red:#d13b3b;--red-soft:#fbe9e9;
     --amber:#e08a1e;--amber-soft:#fbeeda;
+    --orange:#e8590c;--orange-soft:#fdeade;
     --mono:ui-monospace,"SF Mono",Menlo,monospace;
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Hebrew",sans-serif;
     color:var(--ink);background:var(--bg);max-width:440px;margin:0 auto;
@@ -111,9 +112,12 @@
   #go.is-no .go-light{background:var(--red-soft)}
   #go.is-no .go-lamp{background:var(--red);box-shadow:0 0 0 6px rgba(209,59,59,.16),0 6px 18px rgba(209,59,59,.3)}
   #go.is-no .go-label{color:var(--red)}
-  #go.is-wait .go-light{background:var(--chk-soft)}
+  #go.is-wait .go-light{background:var(--amber-soft)}
   #go.is-wait .go-lamp{background:var(--amber);box-shadow:0 0 0 6px rgba(224,138,30,.16)}
   #go.is-wait .go-label{color:var(--amber)}
+  #go.is-maybe .go-light{background:var(--orange-soft)}
+  #go.is-maybe .go-lamp{background:var(--orange);box-shadow:0 0 0 6px rgba(232,89,12,.18),0 6px 18px rgba(232,89,12,.3)}
+  #go.is-maybe .go-label{color:var(--orange)}
 
   #go .go-checks{border-top:1px solid var(--line)}
   #go .go-check{display:flex;align-items:flex-start;gap:10px;padding:11px 18px;
@@ -474,6 +478,15 @@ function initGo() {
     heatBaselineDays: 7,
     heatDeltaMin: 2.0,   // מעלות מעל הממוצע השבועי שנחשב "גל חום"
     heatPenalty: 0.7,    // מכפיל נוסף לסיכוי בזמן גל חום
+    // רוח צפונית (כנראה ניקוז מהגולן/עמק הירדן) מתחרה ברוח המערבית התרמית ולפעמים
+    // "תופסת" קודם את צפון-מזרח הכנרת (כפר נחום) לפני שמתפשטת/לא מתפשטת לדיאמונד —
+    // נצפה לראשונה ב-9/8/2026 (רוח חיה + WRF של כפר נחום, שני המקורות הסכימו).
+    // נמדד מול הכיוון+גאסט החי בכפר נחום, מוריד את הסיכוי (לא שער חוסם)
+    northDirRange: [290, 30],   // צ-מע→צפון→צ-מז (עם מעבר דרך 360/0)
+    northGustMinKts: 10,        // גאסט מינימלי כדי להיחשב "אירוע" ולא רעש
+    northPenalty: 0.6,          // מכפיל הסיכוי כשיש רוח צפונית משמעותית בכפר נחום
+    // מעל האחוז הזה — ירוק. מתחתיו (אך עדיין עם c1+c2 תקינים) — כתום ("אולי", לא בטוח)
+    goProbMin: 65,
     // טבלת סיכוי: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
     ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
   };
@@ -486,7 +499,11 @@ function initGo() {
     const dirs = ["צפון","צ-מז","מזרח","ד-מז","דרום","ד-מע","מערב","צ-מע"];
     return dirs[Math.round(((d % 360) / 45)) % 8];
   };
-  const inRange = (d, [a, b]) => { d = ((d % 360) + 360) % 360; return d >= a && d <= b; };
+  // תומך גם בטווח שעובר דרך 360/0 (למשל [290,30] = צ-מע→צפון→צ-מז) כש-a > b
+  const inRange = (d, [a, b]) => {
+    d = ((d % 360) + 360) % 360;
+    return a <= b ? (d >= a && d <= b) : (d >= a || d <= b);
+  };
 
   function omCurrent(pt, params) {
     const url = "https://api.open-meteo.com/v1/forecast?latitude=" + pt.lat +
@@ -537,7 +554,7 @@ function initGo() {
   const ICON = { pass: ["pass","✓"], fail: ["fail","✕"], warn: ["warn","!"], unk: ["unk","?"] };
 
   function setLight(state, label, sub) {
-    root.classList.remove("is-go","is-no","is-wait");
+    root.classList.remove("is-go","is-no","is-wait","is-maybe");
     root.classList.add(state);
     $("go-label").textContent = label;
     $("go-sub").textContent = sub || "";
@@ -613,7 +630,7 @@ function initGo() {
       fetchGustMax(),
       fetchIMS("zemah"),
       fetchIMS("avnei"),
-      fetchWind("10,6"),
+      fetchWind("10,6,233"),
 	  fetchWSmax10(),
       fetchCoastGustWindow(CFG.coastalFile, CFG.coastalWindow[0], CFG.coastalWindow[1]),
       fetchRecentZemahAvg(CFG.heatBaselineDays)
@@ -645,6 +662,21 @@ function initGo() {
         c1b = { state: coastHasWind ? "pass" : "warn", title: c1b.title,
                 val: "מקסימום " + Math.round(coastGust.max) + " קשר" + (coastGust.at ? " · " + coastGust.at : "") +
                      (coastHasWind ? "" : " · אין רוח משמעותית בחלון") };
+      }
+
+      // --- רוח צפונית בכפר נחום (מתחרה ברוח המערבית, עלולה "לתפוס" את צפון-מזרח הכנרת) ---
+      const kfN = liveWind && liveWind["233"] ? liveWind["233"] : null;
+      const kfNDir = kfN ? kfN.dir : null;
+      const kfNGust = kfN ? msToKts(kfN.gust != null ? kfN.gust : kfN.ws) : null;
+      const northActive = (kfNDir != null && kfNGust != null)
+        ? (inRange(kfNDir, CFG.northDirRange) && kfNGust >= CFG.northGustMinKts)
+        : null;
+      let c1c = { state:"unk", title:"רוח צפונית בכפר נחום (מתחרה ברוח המערבית)", val:"אין נתון" };
+      if (kfNDir != null && kfNGust != null) {
+        c1c = { state: northActive ? "warn" : "pass", title: c1c.title,
+                val: "כיוון " + Math.round(kfNDir) + "° (" + compass(kfNDir) + ") · " + Math.round(kfNGust) + " קשר" +
+                     (northActive ? " · עלולה למנוע מהרוח המערבית להגיע לדיאמונד" : "") +
+                     (kfN.time ? " · " + imsLocalTime(kfN.time) : "") };
       }
 
       // --- תנאי 2: גאסטים WRF ---
@@ -681,6 +713,7 @@ function initGo() {
         prob = probFromDiff(diff);
         if (coastHasWind === false) prob *= CFG.coastalPenalty; // אין רוח בים ב-10:00-14:00 → הסיכוי יורד
         if (isHeatWave) prob *= CFG.heatPenalty;                // גל חום אזורי → הסיכוי יורד
+        if (northActive) prob *= CFG.northPenalty;              // רוח צפונית בכפר נחום → הסיכוי יורד
         const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
         const rawTime = (tzJ && tzJ.time) ? tzJ.time : ((avJ && avJ.time) ? avJ.time : "");
         const mt = imsLocalTime(rawTime);
@@ -689,7 +722,8 @@ function initGo() {
                     "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" +
                     (mt ? " · מדידת " + mt : "") +
                     (coastHasWind === false ? " (הופחת עקב חוסר רוח בים)" : "") +
-                    (isHeatWave ? " (הופחת עקב חום אזורי)" : "") };
+                    (isHeatWave ? " (הופחת עקב חום אזורי)" : "") +
+                    (northActive ? " (הופחת עקב רוח צפונית בכפר נחום)" : "") };
       } else if (pending) {
         c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
       }
@@ -734,7 +768,7 @@ function initGo() {
       }
 
       // ציור השורות
-      const rows = [c1, c1b, c2, c3, c3b, c4].concat(extra);
+      const rows = [c1, c1b, c1c, c2, c3, c3b, c4].concat(extra);
       $("go-checks").innerHTML = rows.map(r => {
         const [cls, ch] = ICON[r.state] || ICON.unk;
         return '<div class="go-check"><span class="go-ic ' + cls + '">' + ch + '</span>' +
@@ -752,8 +786,13 @@ function initGo() {
       } else if (!known) {
         setLight("is-no", "לא ניתן לקבוע", "חלק מהנתונים לא נטענו");
       } else if (goodAll) {
-        setLight("is-go", "סע לגלוש 🏄",
-          prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "%") : "כל התנאים מתקיימים");
+        if (prob != null && prob < CFG.goProbMin) {
+          setLight("is-maybe", "אולי — תנאים גבוליים 🤔",
+            "כיוון+גאסטים תקינים, אך הסיכוי הסטטיסטי נמוך יחסית · ~" + Math.round(prob) + "%");
+        } else {
+          setLight("is-go", "סע לגלוש 🏄",
+            prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "%") : "כל התנאים מתקיימים");
+        }
       } else {
         const missing = [];
         if (c1Relevant && c1.state !== "pass") missing.push("רוח");
@@ -899,24 +938,83 @@ function initLive() {
 
   const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyn5oTGZyQ1tR1_8VjNwpC4siMkjb0S--f6XVVLscTw07tmlepEBJ24Y00gfqE6BYiWdw/exec";
 
-  // תחנות חוף + כנרת (id, שם, קואורדינטות מ-IMS)
+  // תחנות חוף + כנרת — הליבה שהמפה נפתחת מזוהה אליה כברירת מחדל (core:true)
+  // + כל שאר תחנות ה-IMS בארץ עם נתוני רוח בזמן אמת (נשלפו מ-?windstations=1,
+  // סוננו לפי זמינות נתון רוח חי, ונוקו כפילויות של אותה תחנה עם ID ישן/מתוארך)
   const STATIONS = [
-    { id:26,  name:"חיפה נמל",    lat:32.8283, lon:34.9977 },
-    { id:44,  name:"עין כרמל",    lat:32.6808, lon:34.9594 },
-    { id:45,  name:"זכרון יעקב",  lat:32.5724, lon:34.9546 },
-    { id:46,  name:"חדרה נמל",    lat:32.4732, lon:34.8815 },
-    { id:178, name:"ת״א חוף",     lat:32.058,  lon:34.7588 },
-    { id:124, name:"אשדוד נמל",   lat:31.8342, lon:34.6377 },
-    { id:274, name:"ניצן",        lat:31.7319, lon:34.6348 },
-    { id:208, name:"אשקלון נמל",  lat:31.6394, lon:34.5215 },
-    // כנרת
-    { id:233, name:"כפר נחום",    lat:32.8835, lon:35.5792 },
-    { id:6,   name:"בית צידה",    lat:32.88,   lon:35.6504 },
-    { id:115, name:"לב כנרת",     lat:32.8214, lon:35.6053 },
-    { id:502, name:"טבריה",       lat:32.7724, lon:35.5458 },
-    { id:8,   name:"צמח",         lat:32.7024, lon:35.5839 },
-    { id:123, name:"גמלא",        lat:32.9052, lon:35.7487 },
-    { id:2,   name:"אבני איתן",   lat:32.8174, lon:35.7622 }
+    // ===== ליבה: כנרת + נתיב הרוח מהחוף (core) =====
+    { id:26,  name:"חיפה נמל",    lat:32.8283, lon:34.9977, core:true },
+    { id:44,  name:"עין כרמל",    lat:32.6808, lon:34.9594, core:true },
+    { id:45,  name:"זכרון יעקב",  lat:32.5724, lon:34.9546, core:true },
+    { id:46,  name:"חדרה נמל",    lat:32.4732, lon:34.8815, core:true },
+    { id:178, name:"ת״א חוף",     lat:32.058,  lon:34.7588, core:true },
+    { id:124, name:"אשדוד נמל",   lat:31.8342, lon:34.6377, core:true },
+    { id:274, name:"ניצן",        lat:31.7319, lon:34.6348, core:true },
+    { id:208, name:"אשקלון נמל",  lat:31.6394, lon:34.5215, core:true },
+    { id:233, name:"כפר נחום",    lat:32.8835, lon:35.5792, core:true },
+    { id:6,   name:"בית צידה",    lat:32.88,   lon:35.6504, core:true },
+    { id:115, name:"לב כנרת",     lat:32.8214, lon:35.6053, core:true },
+    { id:502, name:"טבריה",       lat:32.7724, lon:35.5458, core:true },
+    { id:8,   name:"צמח",         lat:32.7024, lon:35.5839, core:true },
+    { id:227, name:"גמלא",        lat:32.9052, lon:35.7487, core:true },
+    { id:2,   name:"אבני איתן",   lat:32.8174, lon:35.7622, core:true },
+    // ===== שאר תחנות הרוח בארץ =====
+    { id:10,  name:"מרום גולן (פיקמן)",        lat:33.1288, lon:35.8045 },
+    { id:11,  name:"יבנאל",                    lat:32.6978, lon:35.5101 },
+    { id:13,  name:"תבור-כדורי",               lat:32.7053, lon:35.4069 },
+    { id:16,  name:"עפולה (ניר העמק)",         lat:32.596,  lon:35.2769 },
+    { id:20,  name:"קרני שומרון",              lat:32.1752, lon:35.0959 },
+    { id:21,  name:"אריאל",                    lat:32.1056, lon:35.2114 },
+    { id:22,  name:"ירושלים (גבעת רם)",        lat:31.7704, lon:35.1973 },
+    { id:23,  name:"ירושלים (מרכז)",           lat:31.7806, lon:35.2217 },
+    { id:24,  name:"הר חרשה",                  lat:31.9449, lon:35.1499 },
+    { id:25,  name:"נתיב הל״ה",                lat:31.6898, lon:34.9744 },
+    { id:28,  name:"שני",                      lat:31.3568, lon:35.0662 },
+    { id:29,  name:"ערד",                      lat:31.25,   lon:35.1855 },
+    { id:30,  name:"גלגל",                     lat:31.9973, lon:35.4509 },
+    { id:33,  name:"חצבה",                     lat:30.7787, lon:35.2389 },
+    { id:36,  name:"יטבתה",                    lat:29.8851, lon:35.0771 },
+    { id:42,  name:"חיפה אוניברסיטה",          lat:32.7611, lon:35.0208 },
+    { id:43,  name:"חיפה טכניון",              lat:32.774,  lon:35.0225 },
+    { id:54,  name:"בית דגן",                  lat:32.0073, lon:34.8138 },
+    { id:58,  name:"חוות הבשור",               lat:31.2716, lon:34.3894 },
+    { id:62,  name:"צפת הר כנען",              lat:32.98,   lon:35.507  },
+    { id:65,  name:"סדום",                     lat:31.0306, lon:35.3919 },
+    { id:67,  name:"עין השופט",                lat:32.6028, lon:35.0964 },
+    { id:73,  name:"אילון",                    lat:33.0653, lon:35.2173 },
+    { id:77,  name:"ראש צורים",                lat:31.6644, lon:35.1233 },
+    { id:78,  name:"אפק",                      lat:32.8466, lon:35.1123 },
+    { id:79,  name:"דורות",                    lat:31.5036, lon:34.648  },
+    { id:82,  name:"נגבה",                     lat:31.6585, lon:34.6798 },
+    { id:90,  name:"איתמר",                    lat:32.1598, lon:35.3513 },
+    { id:98,  name:"שדה בוקר",                 lat:30.8702, lon:34.795  },
+    { id:106, name:"ראש הנקרה",                lat:33.0806, lon:35.1079 },
+    { id:112, name:"צומת הנגב",                lat:31.0708, lon:34.8513 },
+    { id:121, name:"חפץ חיים",                 lat:31.791,  lon:34.805  },
+    { id:186, name:"נווה יער",                 lat:32.7078, lon:35.1784 },
+    { id:188, name:"צובה",                     lat:31.7878, lon:35.1258 },
+    { id:202, name:"כפר בלום",                 lat:33.1716, lon:35.6133 },
+    { id:205, name:"אשחר",                     lat:32.8847, lon:35.3012 },
+    { id:206, name:"חוות עדן",                 lat:32.4679, lon:35.4888 },
+    { id:207, name:"פארן",                     lat:30.3655, lon:35.1479 },
+    { id:210, name:"מצוקי דרגות",              lat:31.5881, lon:35.3916 },
+    { id:211, name:"עין גדי",                  lat:31.42,   lon:35.3871 },
+    { id:218, name:"מעלה אדומים",              lat:31.774,  lon:35.2961 },
+    { id:224, name:"מעלה גלבוע",               lat:32.481,  lon:35.415  },
+    { id:228, name:"בית הערבה",                lat:31.8052, lon:35.501  },
+    { id:232, name:"נאות סמדר",                lat:30.048,  lon:35.0233 },
+    { id:241, name:"כפר גלעדי",                lat:33.2404, lon:35.5696 },
+    { id:259, name:"נחשון",                    lat:31.8341, lon:34.9616 },
+    { id:271, name:"עבדת",                     lat:30.7877, lon:34.7712 },
+    { id:338, name:"עזוז",                     lat:30.7911, lon:34.4715 },
+    { id:343, name:"שבי ציון",                 lat:32.9836, lon:35.0923 },
+    { id:349, name:"נבטים",                    lat:31.205,  lon:34.9227 },
+    { id:379, name:"מצפה רמון",                lat:30.6125, lon:34.7967 },
+    { id:380, name:"תל יוסף",                  lat:32.5462, lon:35.3945 },
+    { id:381, name:"אשלים",                    lat:30.983,  lon:34.708  },
+    { id:411, name:"באר שבע (בן גוריון)",      lat:31.2642, lon:34.8045 },
+    { id:499, name:"דפנה",                     lat:33.2254, lon:35.6337 },
+    { id:500, name:"נצרת",                     lat:32.7104, lon:35.3034 }
   ];
 
   // סקאלת windguru: גאסט בקשרים -> צבע
@@ -977,7 +1075,10 @@ function initLive() {
   const map = L.map($("w-map"), { scrollWheelZoom:false, keyboard:false });
   L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
     { maxZoom:18, attribution:"© OpenStreetMap · CARTO" }).addTo(map);
-  map.fitBounds(L.latLngBounds(STATIONS.map(s => [s.lat, s.lon])).pad(0.12));
+  // ברירת מחדל: מרוכז על הליבה (כנרת + נתיב הרוח מהחוף) — שאר התחנות בארץ
+  // עדיין מצוירות על המפה, המשתמש יכול לגלול/להתרחק כדי לראות אותן
+  const coreStations = STATIONS.filter(s => s.core);
+  map.fitBounds(L.latLngBounds((coreStations.length ? coreStations : STATIONS).map(s => [s.lat, s.lon])).pad(0.15));
   setTimeout(() => map.invalidateSize(), 300);
 
   // מקרא צבעים
@@ -1048,12 +1149,23 @@ function initLive() {
       : "אין נתונים כרגע";
   }
 
+  // עם 70+ תחנות, בקשה אחת גדולה ל-?wind= עלולה להיתקע (ה-Apps Script פונה ל-IMS
+  // ברצף, לא במקביל) — מפצלים לצ׳אנקים ומריצים במקביל מהדפדפן, וממזגים תוצאה
+  function fetchWindChunked(ids, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
+    return Promise.all(chunks.map(c =>
+      fetch(APPS_SCRIPT_URL + "?wind=" + c.join(","))
+        .then(r => r.json())
+        .catch(() => ({}))
+    )).then(parts => Object.assign({}, ...parts));
+  }
+
   function load() {
     $("w-foot").textContent = "טוען…";
     $("w-refresh").disabled = true;
-    const ids = STATIONS.map(s => s.id).join(",");
-    fetch(APPS_SCRIPT_URL + "?wind=" + ids)
-      .then(r => r.json())
+    const ids = STATIONS.map(s => s.id);
+    fetchWindChunked(ids, 15)
       .then(data => { draw(data); })
       .catch(() => { draw(null); $("w-foot").textContent = "שגיאה בטעינת הנתונים"; })
       .finally(() => { $("w-refresh").disabled = false; });
