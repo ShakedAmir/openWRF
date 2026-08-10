@@ -512,16 +512,30 @@ function initGo() {
     return fetch(url).then(r => r.json());
   }
 
+  // תאריך היום בפורמט MMDD לפי שעון ישראל — כמו שה-WRF כותב בעמודת הזמן (0810-1800 וכו')
+  function todayMMDD() {
+    const d = new Date();
+    return d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", month:"2-digit" }) +
+           d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", day:"2-digit" });
+  }
+
+  // גאסט מקסימלי בקובץ ה-WRF של דיאמונד, מוגבל ליום הנוכחי בלבד.
+  // הקובץ מכיל בד"כ 2 ימים קדימה (למשל 0810 ו-0811) — בלי סינון לפי תאריך
+  // אפשר לקבל בטעות את המקס' של מחר (למשל 0811-1800) כאילו הוא של היום.
   function fetchGustMax() {
     const url = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(CFG.gustFile);
     return fetch(url).then(r => r.text()).then(txt => {
       if (!txt || txt.startsWith("Error")) return null;
       const lines = txt.trim().split(/\r?\n/);
+      const today = todayMMDD();
       let max = -Infinity, at = "";
-      for (let i = 1; i < lines.length; i++) {
+      // i=0: אין שורת כותרת בקובץ — כל שורה היא נתון אמיתי (MMDD-HHMM,Wind,Dir,Gusts)
+      for (let i = 0; i < lines.length; i++) {
         const c = lines[i].split(",");
+        const key = c[0] || "";
+        if (!key.startsWith(today)) continue;      // רק היום — לא מחר/מחרתיים
         const g = parseFloat(c[3]);           // עמודה 4 = Gusts
-        if (!isNaN(g) && g > max) { max = g; at = c[0]; }
+        if (!isNaN(g) && g > max) { max = g; at = key; }
       }
       return isFinite(max) ? { max, at } : null;
     }).catch(() => null);
@@ -533,12 +547,10 @@ function initGo() {
     return fetch(url).then(r => r.text()).then(txt => {
       if (!txt || txt.startsWith("Error")) return null;
       const lines = txt.trim().split(/\r?\n/);
-      const d = new Date();
-      const today =
-        d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", month:"2-digit" }) +
-        d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", day:"2-digit" });
+      const today = todayMMDD();
       let max = -Infinity, at = "";
-      for (let i = 1; i < lines.length; i++) {
+      // i=0: אין שורת כותרת בקובץ — כל שורה היא נתון אמיתי
+      for (let i = 0; i < lines.length; i++) {
         const c = lines[i].split(",");
         const key = c[0] || "";
         if (!key.startsWith(today)) continue;
