@@ -845,7 +845,34 @@ function initForecast() {
 
   const $ = (id) => document.getElementById(id);
 
-  function analyze(rows, cols) {
+  // שעון-עשרוני (HH.hh) משעה בפורמט "MMDD-HHMM"
+  function decHour(key) {
+    const hhmm = (key || "").split("-")[1] || "";
+    const hh = parseInt(hhmm.slice(0,2), 10);
+    const mm = parseInt(hhmm.slice(2,4), 10);
+    if (isNaN(hh) || isNaN(mm)) return null;
+    return hh + mm / 60;
+  }
+
+  // זריחה/שקיעה להיום (נקודת הכנרת) — משמש לסנן שעות חושך מהתחזית
+  function fetchDaylight() {
+    const url = "https://api.open-meteo.com/v1/forecast?latitude=32.8347&longitude=35.6442&daily=sunrise,sunset&timezone=Asia%2FJerusalem";
+    return fetch(url).then(r => r.json()).then(j => {
+      const toDec = (iso) => {
+        const [hh, mm] = iso.split("T")[1].split(":").map(Number);
+        return hh + mm / 60;
+      };
+      return { fromH: toDec(j.daily.sunrise[0]), toH: toDec(j.daily.sunset[0]) + 0.25 }; // עד רבע שעה אחרי שקיעה
+    }).catch(() => null); // נכשל? עדיף לא לסנן מאשר לאבד את כל התחזית
+  }
+  function fmtH(dec) {
+    const hh = Math.floor(dec), mm = Math.round((dec - hh) * 60);
+    return (hh<10?"0"+hh:hh) + ":" + (mm<10?"0"+mm:mm);
+  }
+
+  // daylight: {fromH, toH} — כשקיים, שעות מחוץ לטווח (חושך) לא נכנסות לחישוב
+  // המקס' והחלון בכלל, כי אין טעם לדווח על רוח בשעה שאי אפשר לגלוש בה
+  function analyze(rows, cols, daylight) {
 	  const gcol = cols[3] || cols[1];
 	  const dcol = cols[2];
 	  let maxG = -Infinity, maxAt = "", dirAtMax = null;
@@ -853,6 +880,11 @@ function initForecast() {
 	  const stepH = 0.5;
 
 	  rows.forEach(r => {
+		const key = r[cols[0]];
+		if (daylight) {
+		  const h = decHour(key);
+		  if (h == null || h < daylight.fromH || h > daylight.toH) return; // חושך — לא רלוונטי
+		}
 		const g = parseFloat(r[gcol]);
 		if (!isNaN(g)) {
 		  if (g > maxG) { maxG = g; at = r[cols[0]]; dirAtMax = dcol ? parseFloat(r[dcol]) : null; }
@@ -871,7 +903,7 @@ function initForecast() {
 	}
 
 
-  function load(fname) {
+  function load(fname, daylight) {
 	  return new Promise((res) => {
 		fetch(APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname))
 		  .then(r => r.text())
@@ -893,7 +925,7 @@ function initForecast() {
 
 			if (!rowsToday.length) return res(null);
 
-			res(analyze(rowsToday, cols));
+			res(analyze(rowsToday, cols, daylight));
 		  })
 		  .catch(() => res(null));
 	  });
@@ -933,12 +965,15 @@ function initForecast() {
   function run() {
     $("fc-foot").textContent = "טוען…";
     $("fc-refresh").disabled = true;
-    Promise.all(SPOTS.map(s => load(PREFIX + s.f + ".csv"))).then(results => {
-      render(results);
-      const ok = results.filter(Boolean).length;
-      $("fc-date").textContent = new Date().toLocaleDateString("he-IL", {weekday:"long", day:"numeric", month:"long"});
-      $("fc-foot").textContent = "מקור: WRF-1km · " + ok + "/" + SPOTS.length + " ספוטים נטענו · חלון = רצף שעות מעל " + WINDOW_KTS + " קשר";
-      $("fc-refresh").disabled = false;
+    fetchDaylight().then(daylight => {
+      Promise.all(SPOTS.map(s => load(PREFIX + s.f + ".csv", daylight))).then(results => {
+        render(results);
+        const ok = results.filter(Boolean).length;
+        $("fc-date").textContent = new Date().toLocaleDateString("he-IL", {weekday:"long", day:"numeric", month:"long"});
+        const daylightTxt = daylight ? (" · אור יום " + fmtH(daylight.fromH) + "–" + fmtH(daylight.toH)) : "";
+        $("fc-foot").textContent = "מקור: WRF-1km · " + ok + "/" + SPOTS.length + " ספוטים נטענו · חלון = רצף שעות מעל " + WINDOW_KTS + " קשר" + daylightTxt;
+        $("fc-refresh").disabled = false;
+      });
     });
   }
 
