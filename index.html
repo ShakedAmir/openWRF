@@ -1378,7 +1378,7 @@ function initStations() {
       const ok = sets.filter(Boolean);
       if (!ok.length) { $("wrf-d-msg").textContent = "Couldn't read the data files for this station."; return; }
       $("wrf-d-msg").textContent = "";
-      drawChart(ok);
+      drawChart(ok[0]);
       drawWindguruTable(ok[0]);
     });
   }
@@ -1445,19 +1445,36 @@ function initStations() {
 	}
 
 
-  function drawChart(sets) {
-    const colors = { Forecast:"#1273b8", Observed:"#e0552e" };
-    const labels = sets[0].labels;
-    const ds = sets.map((s) => ({
-      label: s.tag + (s.gust ? " (Gusts)" : " (Wind)"),
-      data: s.gust || s.speed,
-      borderColor: colors[s.tag] || "#5b7186",
-      backgroundColor: "transparent",
-      borderWidth: 2,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      tension: .25
-    }));
+  // מציג תמיד מקור אחד בלבד (אותו set שהטבלה מתחת מציגה — ok[0]: Forecast אם קיים,
+  // אחרת Observed) כדי שלא יהיו 4 קווים/מקראות — רק שני מדדים: Wind (kts) בכחול,
+  // Gusts (kts) בכתום
+  function drawChart(set) {
+    const ds = [];
+    if (set.speed) {
+      ds.push({
+        label: "Wind (kts)",
+        data: set.speed,
+        borderColor: "#1273b8",
+        backgroundColor: "transparent",
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        tension: .25
+      });
+    }
+    if (set.gust) {
+      ds.push({
+        label: "Gusts (kts)",
+        data: set.gust,
+        borderColor: "#e8590c",
+        backgroundColor: "transparent",
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        tension: .25
+      });
+    }
+    const labels = set.labels;
 
     chart = new Chart($("wrf-canvas"), {
       type: "line",
