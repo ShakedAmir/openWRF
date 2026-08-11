@@ -740,9 +740,12 @@ function initGo() {
         c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
       }
 
-      // --- תנאי 4: מקום שמור ---
+      // --- תנאי 4: הסיכוי המצרפי — זו השורה שמסבירה למה הרמזור "אולי" (כתום) ולא ירוק,
+      // אז הצבע שלה חייב לשקף את הסף (goProbMin), לא להיות ירוק קבוע
       const c4 = (diff != null)
-        ? { state:"pass", title:"סיכוי לגלישה", val:"סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" }
+        ? { state: prob >= CFG.goProbMin ? "pass" : "warn", title:"סיכוי לגלישה",
+            val: "סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" +
+                 (prob < CFG.goProbMin ? " · מתחת לסף הירוק (" + CFG.goProbMin + "%)" : "") }
         : { state:"unk", title:"סיכוי לגלישה", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
 
 // --- אינדיקטורים חיים (IMS) ---
