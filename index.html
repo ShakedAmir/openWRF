@@ -452,6 +452,31 @@ function imsLocalTime(dt) {
   return hm;
 }
 
+// ===== עזרי אור-יום (משותפים ל-initGo ול-initForecast) =====
+// שעון-עשרוני (HH.hh) משעה בפורמט "MMDD-HHMM"
+function decHour(key) {
+  const hhmm = (key || "").split("-")[1] || "";
+  const hh = parseInt(hhmm.slice(0,2), 10);
+  const mm = parseInt(hhmm.slice(2,4), 10);
+  if (isNaN(hh) || isNaN(mm)) return null;
+  return hh + mm / 60;
+}
+// זריחה/שקיעה להיום (נקודת הכנרת) — עד רבע שעה אחרי השקיעה עדיין נחשב "אור"
+function fetchDaylight() {
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=32.8347&longitude=35.6442&daily=sunrise,sunset&timezone=Asia%2FJerusalem";
+  return fetch(url).then(r => r.json()).then(j => {
+    const toDec = (iso) => {
+      const [hh, mm] = iso.split("T")[1].split(":").map(Number);
+      return hh + mm / 60;
+    };
+    return { fromH: toDec(j.daily.sunrise[0]), toH: toDec(j.daily.sunset[0]) + 0.25 };
+  }).catch(() => null); // נכשל? עדיף לא לסנן מאשר לאבד את כל התחזית
+}
+function fmtH(dec) {
+  const hh = Math.floor(dec), mm = Math.round((dec - hh) * 60);
+  return (hh<10?"0"+hh:hh) + ":" + (mm<10?"0"+mm:mm);
+}
+
 function initGo() {
 
   // ===== CONFIG =========================================================
@@ -487,8 +512,14 @@ function initGo() {
     northPenalty: 0.6,          // מכפיל הסיכוי כשיש רוח צפונית משמעותית בכפר נחום
     // מעל האחוז הזה — ירוק. מתחתיו (אך עדיין עם c1+c2 תקינים) — כתום ("אולי", לא בטוח)
     goProbMin: 65,
-    // טבלת סיכוי: הפרש טמפ' (10:30) → אחוז סיכוי לשעתיים גלישה
-    ronen: [[3.5,65],[4,69],[4.5,74],[5,80],[5.5,84]]
+    // הסיכוי מבוסס על **חוזק תחזית ה-WRF עצמה** (כמה מעל gustMinKts היא חוזה) —
+    // לא על הפרש הטמפ' כמו קודם. בבקטסט של יולי הפרש הטמפ' התברר כמתאם חלש (r≈0.2),
+    // בעוד שה-WRF (c2) כבר הוכיח חיזוי טוב (למשל 11/8: 21.9 קשר נחזו בבוקר, בפועל
+    // נמדדו 24.7 קשר בלב כנרת אחה"צ). זו נוסחה מבוססת-היגיון בשלב זה — לא מכוילת
+    // סטטיסטית עדיין, כי אין עוד מספיק ימים בארכיון ה-WRF. לכייל מחדש ברגע שיהיה.
+    wrfProbAtThreshold: 55,  // % כשה-WRF בדיוק על הסף — ביטחון גבולי, לא גבוה
+    wrfProbPerKt: 3,         // תוספת % לכל קשר שה-WRF חוזה מעל הסף
+    wrfProbMax: 92           // תקרה — תמיד נשארת אי-ודאות בתחזית
   };
   // ======================================================================
 
@@ -519,12 +550,14 @@ function initGo() {
            d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", day:"2-digit" });
   }
 
-  // גאסט מקסימלי בקובץ ה-WRF של דיאמונד, מוגבל ליום הנוכחי בלבד.
-  // הקובץ מכיל בד"כ 2 ימים קדימה (למשל 0810 ו-0811) — בלי סינון לפי תאריך
-  // אפשר לקבל בטעות את המקס' של מחר (למשל 0811-1800) כאילו הוא של היום.
+  // גאסט מקסימלי בקובץ ה-WRF של דיאמונד, מוגבל ליום הנוכחי ולשעות אור יום בלבד.
+  // הקובץ מכיל בד"כ 2 ימים קדימה (למשל 0810 ו-0811) — בלי סינון לפי תאריך אפשר
+  // לקבל בטעות את המקס' של מחר כאילו הוא של היום. וגם אם זה היום — גאסט בשעה
+  // 02:00 לא רלוונטי לגלישה, ועכשיו שהמקס' הזה מזין ישירות את אחוז הסיכוי
+  // (ר' probFromWrf) חשוב במיוחד לא לתת לו לזהם את החישוב.
   function fetchGustMax() {
     const url = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(CFG.gustFile);
-    return fetch(url).then(r => r.text()).then(txt => {
+    return Promise.all([fetch(url).then(r => r.text()), fetchDaylight()]).then(([txt, daylight]) => {
       if (!txt || txt.startsWith("Error")) return null;
       const lines = txt.trim().split(/\r?\n/);
       const today = todayMMDD();
@@ -534,6 +567,10 @@ function initGo() {
         const c = lines[i].split(",");
         const key = c[0] || "";
         if (!key.startsWith(today)) continue;      // רק היום — לא מחר/מחרתיים
+        if (daylight) {
+          const h = decHour(key);
+          if (h == null || h < daylight.fromH || h > daylight.toH) continue; // חושך
+        }
         const g = parseFloat(c[3]);           // עמודה 4 = Gusts
         if (!isNaN(g) && g > max) { max = g; at = key; }
       }
@@ -611,25 +648,12 @@ function initGo() {
   }
 
 
-  // התאמת פרבולה (least-squares) לטבלת הסיכוי -> אחוז סיכוי לפי הפרש
-  const QUAD = fitQuad(CFG.ronen);
-  function fitQuad(pts) {
-    let n = pts.length, Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
-    pts.forEach(([x,y]) => { const x2=x*x;
-      Sx+=x; Sx2+=x2; Sx3+=x2*x; Sx4+=x2*x2; Sy+=y; Sxy+=x*y; Sx2y+=x2*y; });
-    return solve3([[Sx4,Sx3,Sx2,Sx2y],[Sx3,Sx2,Sx,Sxy],[Sx2,Sx,n,Sy]]);
-  }
-  function solve3(M) {
-    for (let i=0;i<3;i++){
-      const pv=M[i][i];
-      for (let k=i;k<4;k++) M[i][k]/=pv;
-      for (let r=0;r<3;r++) if (r!==i){ const f=M[r][i]; for (let k=i;k<4;k++) M[r][k]-=f*M[i][k]; }
-    }
-    return [M[0][3], M[1][3], M[2][3]];
-  }
-  function probFromDiff(d) {
-    const [a,b,c] = QUAD;
-    return Math.max(0, Math.min(100, a*d*d + b*d + c));
+  // אחוז סיכוי מתוך חוזק תחזית ה-WRF עצמה (כמה קשר מעל gustMinKts היא חוזה).
+  // עדיין לא מכויל סטטיסטית (ר' הערה ב-CFG) — פונקציה לינארית פשוטה עם תקרה.
+  function probFromWrf(gustMax) {
+    const excess = gustMax - CFG.gustMinKts;
+    const p = CFG.wrfProbAtThreshold + CFG.wrfProbPerKt * excess;
+    return Math.max(0, Math.min(CFG.wrfProbMax, p));
   }
 
   function run() {
@@ -699,7 +723,8 @@ function initGo() {
                val: "מקסימום " + Math.round(gust.max) + " קשר" + (gust.at ? " · " + gust.at : "") };
       }
 
-      // --- תנאי 3: הפרש טמפרטורות ---
+      // --- תנאי 3: הפרש טמפרטורות — כרגע רק מידע נלווה + קלט לבדיקת חום אזורי (c3b),
+      // לא מזין יותר את אחוז הסיכוי (ר' הערה ב-CFG למה) ---
       let c3 = { state:"unk", title:"הפרש צמח − אבני איתן ≥ " + CFG.tempDiffMin + "°", val:"אין נתון" };
       const pending = (tzJ && tzJ.pending) || (avJ && avJ.pending);
       const tTz = tzJ && typeof tzJ.temp === "number" ? tzJ.temp : null;
@@ -719,34 +744,38 @@ function initGo() {
                      (isHeatWave ? " · גל חום — ייתכן ריפוי מפל הרוח" : "") };
       }
 
-      let diff = null, prob = null;
+      let diff = null;
       if (tTz != null && tAv != null) {
         diff = tTz - tAv;
-        prob = probFromDiff(diff);
-        if (coastHasWind === false) prob *= CFG.coastalPenalty; // אין רוח בים ב-10:00-14:00 → הסיכוי יורד
-        if (isHeatWave) prob *= CFG.heatPenalty;                // גל חום אזורי → הסיכוי יורד
-        if (northActive) prob *= CFG.northPenalty;              // רוח צפונית בכפר נחום → הסיכוי יורד
         const state = diff >= CFG.tempDiffMin ? "pass" : "warn";
         const rawTime = (tzJ && tzJ.time) ? tzJ.time : ((avJ && avJ.time) ? avJ.time : "");
         const mt = imsLocalTime(rawTime);
         c3 = { state, title: c3.title,
                val: "צמח " + tTz.toFixed(1) + "° · אבני איתן " + tAv.toFixed(1) +
-                    "° · הפרש " + diff.toFixed(1) + "° · סיכוי ~" + Math.round(prob) + "%" +
-                    (mt ? " · מדידת " + mt : "") +
-                    (coastHasWind === false ? " (הופחת עקב חוסר רוח בים)" : "") +
-                    (isHeatWave ? " (הופחת עקב חום אזורי)" : "") +
-                    (northActive ? " (הופחת עקב רוח צפונית בכפר נחום)" : "") };
+                    "° · הפרש " + diff.toFixed(1) + "°" +
+                    (mt ? " · מדידת " + mt : "") };
       } else if (pending) {
         c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
       }
 
-      // --- תנאי 4: הסיכוי המצרפי — זו השורה שמסבירה למה הרמזור "אולי" (כתום) ולא ירוק,
-      // אז הצבע שלה חייב לשקף את הסף (goProbMin), לא להיות ירוק קבוע
-      const c4 = (diff != null)
+      // --- הסיכוי המצרפי: מבוסס בעיקר על חוזק תחזית ה-WRF (c2), לא על הפרש הטמפ' —
+      // ולכן זמין כבר עם עלייה הראשונה של קובץ ה-WRF, בלי לחכות למדידת 10:30 ---
+      let prob = null;
+      if (gust) {
+        prob = probFromWrf(gust.max);
+        if (coastHasWind === false) prob *= CFG.coastalPenalty; // אין רוח בים ב-10:00-14:00 → הסיכוי יורד
+        if (isHeatWave) prob *= CFG.heatPenalty;                // גל חום אזורי → הסיכוי יורד (רק אם כבר יש מדידת טמפ')
+        if (northActive) prob *= CFG.northPenalty;              // רוח צפונית בכפר נחום → הסיכוי יורד
+      }
+
+      // זו השורה שמסבירה למה הרמזור "אולי" (כתום) ולא ירוק — הצבע שלה חייב לשקף
+      // את הסף (goProbMin), לא להיות ירוק קבוע
+      const c4 = (prob != null)
         ? { state: prob >= CFG.goProbMin ? "pass" : "warn", title:"סיכוי לגלישה",
             val: "סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" +
-                 (prob < CFG.goProbMin ? " · מתחת לסף הירוק (" + CFG.goProbMin + "%)" : "") }
-        : { state:"unk", title:"סיכוי לגלישה", val: pending ? "ממתין למדידת 10:30" : "ממתין לנתוני טמפרטורה" };
+                 (prob < CFG.goProbMin ? " · מתחת לסף הירוק (" + CFG.goProbMin + "%)" : "") +
+                 (pending ? " · טרם כולל בדיקת חום אזורי (10:30)" : "") }
+        : { state:"unk", title:"סיכוי לגלישה", val:"ממתין לתחזית ה-WRF" };
 
 // --- אינדיקטורים חיים (IMS) ---
       const kts = (v) => msToKts(v); // המרת IMS מ-m/s לקשרים
@@ -792,21 +821,23 @@ function initGo() {
       }).join("");
 	  
 // --- הכרעה ---
-      // c3 (הפרש טמפ') כבר לא שער חוסם — רק משפיע על אחוז הסיכוי (כמו c1b וחום אזורי)
+      // c3 (הפרש טמפ') כבר לא שער חוסם — רק קלט ל-c3b (חום אזורי).
+      // הרמזור כבר לא מחכה למדידת 10:30 (pending) כדי להכריע — c1+c2+הסיכוי
+      // מבוסס-WRF זמינים הרבה יותר מוקדם, וזה בדיוק הרעיון: תחזית לפני שהרוח נכנסת.
+      // בדיקת החום האזורי (c3b) פשוט מצטרפת כמודיפייר בשקט ברגע שהיא זמינה.
       const decisionChecks = c1Relevant ? [c1, c2] : [c2];
       const known = decisionChecks.every(c => c.state !== "unk");
       const goodAll = decisionChecks.every(c => c.state === "pass");
-      if (pending) {
-        setLight("is-wait", "ממתין ל-10:30", "מדידת הטמפרטורות תתעדכן ~10:45");
-      } else if (!known) {
+      const pendingNote = pending ? " · טרם כולל בדיקת חום אזורי (10:30)" : "";
+      if (!known) {
         setLight("is-no", "לא ניתן לקבוע", "חלק מהנתונים לא נטענו");
       } else if (goodAll) {
         if (prob != null && prob < CFG.goProbMin) {
           setLight("is-maybe", "אולי — תנאים גבוליים 🤔",
-            "כיוון+גאסטים תקינים, אך הסיכוי הסטטיסטי נמוך יחסית · ~" + Math.round(prob) + "%");
+            "כיוון+גאסטים תקינים, אך הביטחון נמוך יחסית · ~" + Math.round(prob) + "%" + pendingNote);
         } else {
           setLight("is-go", "סע לגלוש 🏄",
-            prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "%") : "כל התנאים מתקיימים");
+            (prob != null ? ("סיכוי לשעתיים ~" + Math.round(prob) + "%") : "כל התנאים מתקיימים") + pendingNote);
         }
       } else {
         const missing = [];
@@ -848,30 +879,7 @@ function initForecast() {
 
   const $ = (id) => document.getElementById(id);
 
-  // שעון-עשרוני (HH.hh) משעה בפורמט "MMDD-HHMM"
-  function decHour(key) {
-    const hhmm = (key || "").split("-")[1] || "";
-    const hh = parseInt(hhmm.slice(0,2), 10);
-    const mm = parseInt(hhmm.slice(2,4), 10);
-    if (isNaN(hh) || isNaN(mm)) return null;
-    return hh + mm / 60;
-  }
-
-  // זריחה/שקיעה להיום (נקודת הכנרת) — משמש לסנן שעות חושך מהתחזית
-  function fetchDaylight() {
-    const url = "https://api.open-meteo.com/v1/forecast?latitude=32.8347&longitude=35.6442&daily=sunrise,sunset&timezone=Asia%2FJerusalem";
-    return fetch(url).then(r => r.json()).then(j => {
-      const toDec = (iso) => {
-        const [hh, mm] = iso.split("T")[1].split(":").map(Number);
-        return hh + mm / 60;
-      };
-      return { fromH: toDec(j.daily.sunrise[0]), toH: toDec(j.daily.sunset[0]) + 0.25 }; // עד רבע שעה אחרי שקיעה
-    }).catch(() => null); // נכשל? עדיף לא לסנן מאשר לאבד את כל התחזית
-  }
-  function fmtH(dec) {
-    const hh = Math.floor(dec), mm = Math.round((dec - hh) * 60);
-    return (hh<10?"0"+hh:hh) + ":" + (mm<10?"0"+mm:mm);
-  }
+  // decHour/fetchDaylight/fmtH מוגדרות גלובלית (משותפות עם initGo) — ר' תחילת הקובץ
 
   // daylight: {fromH, toH} — כשקיים, שעות מחוץ לטווח (חושך) לא נכנסות לחישוב
   // המקס' והחלון בכלל, כי אין טעם לדווח על רוח בשעה שאי אפשר לגלוש בה
@@ -1227,7 +1235,7 @@ function initLive() {
 
 function initStations() {
 
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby0k1iGd_P-AEo7pBMnuFV8Z_Dt16MQcTRwxP-Lrtbjg9hSfcAXc4uk-mxZCYT0NZkLNQ/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzRB40dGVFS3qmmJJEUaOOfOXGwcSpbDDibrJxZoMc3eWB-gaDK1Z05LrdrnXAmkoUFNw/exec";
 
   // אם החצים יוצאים הפוכים, שנה ל-false
   const ARROW_POINTS_DOWNWIND = true;
