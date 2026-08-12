@@ -477,6 +477,17 @@ function fmtH(dec) {
   return (hh<10?"0"+hh:hh) + ":" + (mm<10?"0"+mm:mm);
 }
 
+// קבצי ה-WRF (5 הליבה: דיאמונד/קרית ים/בצת/נחשולים/בית ינאי) נדחפים פעם ביום
+// ל-GitHub ע"י Apps Script (ר' github_daily_push.gs) — קריאה ישירה מ-raw.githubusercontent.com
+// מהירה ואמינה בהרבה מ-Apps Script/Drive (ראינו היום 404 זמניים ואיטיות של 16+ שניות שם).
+// אם קובץ מסוים עדיין לא נדחף (למשל לפני שההגדרה הזו הופעלה), נופלים חזרה ל-Apps Script.
+const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/shakedamir/openWRF/main/data/";
+function fetchCsvSmart(filename, appsScriptUrl) {
+  return fetch(GITHUB_RAW_BASE + encodeURIComponent(filename) + "?_=" + Date.now())
+    .then(r => { if (!r.ok) throw new Error("github " + r.status); return r.text(); })
+    .catch(() => fetch(appsScriptUrl + "?name=" + encodeURIComponent(filename) + "&_=" + Date.now()).then(r => r.text()));
+}
+
 function initGo() {
 
   // ===== CONFIG =========================================================
@@ -556,8 +567,7 @@ function initGo() {
   // 02:00 לא רלוונטי לגלישה, ועכשיו שהמקס' הזה מזין ישירות את אחוז הסיכוי
   // (ר' probFromWrf) חשוב במיוחד לא לתת לו לזהם את החישוב.
   function fetchGustMax() {
-    const url = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(CFG.gustFile);
-    return Promise.all([fetch(url).then(r => r.text()), fetchDaylight()]).then(([txt, daylight]) => {
+    return Promise.all([fetchCsvSmart(CFG.gustFile, APPS_SCRIPT_URL), fetchDaylight()]).then(([txt, daylight]) => {
       if (!txt || txt.startsWith("Error")) return null;
       const lines = txt.trim().split(/\r?\n/);
       const today = todayMMDD();
@@ -580,8 +590,7 @@ function initGo() {
 
   // גאסט מקסימלי בקובץ ה-WRF של תחנת חוף, מוגבל להיום ולחלון שעות נתון [fromH, toH)
   function fetchCoastGustWindow(fname, fromH, toH) {
-    const url = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname);
-    return fetch(url).then(r => r.text()).then(txt => {
+    return fetchCsvSmart(fname, APPS_SCRIPT_URL).then(txt => {
       if (!txt || txt.startsWith("Error")) return null;
       const lines = txt.trim().split(/\r?\n/);
       const today = todayMMDD();
@@ -916,8 +925,7 @@ function initForecast() {
 
   function load(fname, daylight) {
 	  return new Promise((res) => {
-		fetch(APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname))
-		  .then(r => r.text())
+		fetchCsvSmart(fname, APPS_SCRIPT_URL)
 		  .then(txt => {
 			if (!txt || txt.startsWith("Error")) return res(null);
 
