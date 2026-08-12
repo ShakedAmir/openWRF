@@ -1406,13 +1406,7 @@ function initStations() {
 
   function load(fname, tag) {
 	  return new Promise((res) => {
-		const requestUrl = APPS_SCRIPT_URL + "?name=" + encodeURIComponent(fname);
-
-		fetch(requestUrl)
-		  .then(response => {
-			if (!response.ok) throw new Error("HTTP error " + response.status);
-			return response.text();
-		  })
+		fetchCsvSmart(fname, APPS_SCRIPT_URL)
 		  .then(csvText => {
 			if (csvText.startsWith("Error")) return res(null);
 
