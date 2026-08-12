@@ -994,7 +994,7 @@ function initForecast() {
 
 function initLive() {
 
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyn5oTGZyQ1tR1_8VjNwpC4siMkjb0S--f6XVVLscTw07tmlepEBJ24Y00gfqE6BYiWdw/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwK_3bU5fB45MBORRWAiv-p29-9QJmn2_LsBXGZG0NmlQrTUIML8fCU99oIfhS-ynHP4w/exec";
 
   // תחנות חוף + כנרת — הליבה שהמפה נפתחת מזוהה אליה כברירת מחדל (core:true)
   // + כל שאר תחנות ה-IMS בארץ עם נתוני רוח בזמן אמת (נשלפו מ-?windstations=1,
@@ -1207,8 +1207,10 @@ function initLive() {
       : "אין נתונים כרגע";
   }
 
-  // עם 70+ תחנות, בקשה אחת גדולה ל-?wind= עלולה להיתקע (ה-Apps Script פונה ל-IMS
-  // ברצף, לא במקביל) — מפצלים לצ׳אנקים ומריצים במקביל מהדפדפן, וממזגים תוצאה
+  // הפיצול לצ'אנקים היה עקיפה זמנית לכך שה-?wind= פנה ל-IMS ברצף בצד השרת (איטי מאוד
+  // עם 70+ תחנות — 28.7 שניות במדידה בפועל). זה תוקן בצד השרת עם UrlFetchApp.fetchAll
+  // (מקבילי), אז אפשר לחזור לבקשה אחת פשוטה — אבל משאירים 2 צ'אנקים (לא 1) כדי שכשל
+  // ברשת/quota חד-פעמי לא יפיל את כל 70+ התחנות ביחד, רק חצי מהן
   function fetchWindChunked(ids, chunkSize) {
     const chunks = [];
     for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
@@ -1223,7 +1225,7 @@ function initLive() {
     $("w-foot").textContent = "טוען…";
     $("w-refresh").disabled = true;
     const ids = STATIONS.map(s => s.id);
-    fetchWindChunked(ids, 15)
+    fetchWindChunked(ids, Math.ceil(ids.length / 2))
       .then(data => { draw(data); })
       .catch(() => { draw(null); $("w-foot").textContent = "שגיאה בטעינת הנתונים"; })
       .finally(() => { $("w-refresh").disabled = false; });
