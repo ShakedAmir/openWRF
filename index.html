@@ -539,7 +539,8 @@ function initGo() {
     med:        { lat: 32.40, lon: 34.25 },   // נקודה בים התיכון
     favDir:     [170, 290],                   // דרום→מערב (מעלות, מטאורולוגי)
     gustFile:   "18z_1km_Kineret_Diamond.csv",
-    gustMinKts: 20,
+    gustMinKts: 20,      // סף "עובר/לא עובר" — האם בכלל שווה לצאת היום
+    rideWindowKts: 18,   // סף נמוך יותר לחישוב "כמה זמן אפשר לגלוש בפועל" (כמו בכרטיס תחזית הרוח)
     tempDiffMin: 4,
     // רוח החוף בקרית ים בדר"כ מתחילה בין 10:00-14:00; אם אין גאסט משמעותי בחלון הזה,
     // הסיכוי לרוח טובה בכנרת יורד (ר' coastalPenalty למטה)
@@ -568,9 +569,12 @@ function initGo() {
     // בעוד שה-WRF (c2) כבר הוכיח חיזוי טוב (למשל 11/8: 21.9 קשר נחזו בבוקר, בפועל
     // נמדדו 24.7 קשר בלב כנרת אחה"צ). זו נוסחה מבוססת-היגיון בשלב זה — לא מכוילת
     // סטטיסטית עדיין, כי אין עוד מספיק ימים בארכיון ה-WRF. לכייל מחדש ברגע שיהיה.
-    wrfProbAtThreshold: 55,  // % כשה-WRF בדיוק על הסף — ביטחון גבולי, לא גבוה
+    // כיול לפי נתון אמת: ב-13.08 גאסט מקס' 21.3 קשר (1.3 מעל הסף) תורגם בפועל
+    // ל-75-85% סיכוי גלישה בשטח, לא ~59% כמו שהנוסחה הקודמת (בסיס 55) נתנה —
+    // כלומר עצם החצייה של הסף כבר אומרת ביטחון גבוה יחסית, לא גבולי
+    wrfProbAtThreshold: 76,  // % כשה-WRF בדיוק על הסף
     wrfProbPerKt: 3,         // תוספת % לכל קשר שה-WRF חוזה מעל הסף
-    wrfProbMax: 92           // תקרה — תמיד נשארת אי-ודאות בתחזית
+    wrfProbMax: 95           // תקרה — תמיד נשארת אי-ודאות בתחזית
   };
   // ======================================================================
 
@@ -611,11 +615,36 @@ function initGo() {
       if (!txt || txt.startsWith("Error")) return null;
       const lines = txt.trim().split(/\r?\n/);
       const today = todayMMDD();
-      // אותה לוגיקת "רצף רציף" (עם היסטרזיס) שמוצגת בכרטיס תחזית הרוח —
-      // כדי שהרמזור יראה "מתי הרוח באמת מתחילה" ולא רק את שיא בודד
-      const r = bestGustWindow(lines, today, daylight, CFG.gustMinKts, 2);
+      // אותה לוגיקת "רצף רציף" (עם היסטרזיס) שמוצגת בכרטיס תחזית הרוח — עם סף
+      // הגלישה בפועל (rideWindowKts=18), לא סף ה"עובר/לא עובר" (gustMinKts=20),
+      // כדי שהרמזור יראה כמה זמן אפשר לגלוש בפועל ולא רק מתי חוצים 20 קשר
+      const r = bestGustWindow(lines, today, daylight, CFG.rideWindowKts, 2);
       return r.max != null ? r : null;
     }).catch(() => null);
+  }
+
+  // תחזית GFS (מודל גלובלי, ~13 ק"מ) לנקודת הדיאמונד — אישוש/סתירה עצמאי לכיוון
+  // שה-WRF-1km חוזה בזמן שיא הגאסט. לא ברזולוציה של WRF-1km ולא תופס אפקטי הגברה
+  // מקומיים, אבל שימושי כבדיקת כיוון בלתי-תלויה (שני מודלים שונים לגמרי)
+  function fetchGfsHourly() {
+    const url = "https://api.open-meteo.com/v1/forecast?latitude=32.8347&longitude=35.6442" +
+      "&hourly=wind_direction_10m&wind_speed_unit=kn&timezone=Asia%2FJerusalem&models=gfs_seamless&forecast_days=1";
+    return fetch(url).then(r => r.json()).catch(() => null);
+  }
+
+  // מכיוון שעות ה-GFS ל-key בפורמט "MMDD-HHMM", מחזיר את הכיוון בשעה הקרובה ביותר
+  function gfsDirAt(gfsJ, key) {
+    if (!gfsJ || !gfsJ.hourly || !key) return null;
+    const targetH = decHour(key);
+    if (targetH == null) return null;
+    const times = gfsJ.hourly.time, dirs = gfsJ.hourly.wind_direction_10m;
+    let bestI = -1, bestDiff = Infinity;
+    times.forEach((t, i) => {
+      const hh = parseInt(t.slice(11, 13), 10), mm = parseInt(t.slice(14, 16), 10);
+      const diff = Math.abs((hh + mm / 60) - targetH);
+      if (diff < bestDiff) { bestDiff = diff; bestI = i; }
+    });
+    return bestI >= 0 ? dirs[bestI] : null;
   }
 
   // גאסט מקסימלי בקובץ ה-WRF של תחנת חוף, מוגבל להיום ולחלון שעות נתון [fromH, toH)
@@ -708,8 +737,9 @@ function initGo() {
       fetchWind("10,6,233"),
 	  fetchWSmax10(),
       fetchCoastGustWindow(CFG.coastalFile, CFG.coastalWindow[0], CFG.coastalWindow[1]),
-      fetchRecentZemahAvg(CFG.heatBaselineDays)
-    ]).then(([medJ, gust, tzJ, avJ, liveWind, mgAvgData, coastGust, recentAvgTemp]) => {
+      fetchRecentZemahAvg(CFG.heatBaselineDays),
+      fetchGfsHourly()
+    ]).then(([medJ, gust, tzJ, avJ, liveWind, mgAvgData, coastGust, recentAvgTemp, gfsJ]) => {
       // --- תנאי 1: כיוון רוח בים (רלוונטי רק עד 13:00 — הרוח מגיעה לכנרת כ-4 שעות אחרי) ---
       const ilHour = parseInt(new Date().toLocaleString("en-GB",
         { timeZone:"Asia/Jerusalem", hour12:false }).split(", ")[1].split(":")[0], 10);
@@ -761,8 +791,16 @@ function initGo() {
         const windowTxt = gust.windowStart
           ? " · רצף רציף מ-" + fmtH(decHour(gust.windowStart)) + " (" + gust.windowH + " שעות)"
           : "";
+        // אישוש כיוון בלתי-תלוי מ-GFS (מודל שונה לגמרי) בשעת שיא הגאסט של ה-WRF —
+        // תג בלבד, לא משפיע על האחוזים
+        const gfsDir = gfsDirAt(gfsJ, gust.at);
+        const gfsTxt = gfsDir != null
+          ? (inRange(gfsDir, CFG.favDir)
+              ? " · ✓ מאושר גם ב-GFS (" + Math.round(gfsDir) + "°)"
+              : " · ⚠ GFS חוזה כיוון שונה (" + Math.round(gfsDir) + "°)")
+          : "";
         c2 = { state: ok ? "pass" : "fail", title: c2.title,
-               val: "מקסימום " + Math.round(gust.max) + " קשר" + (gust.at ? " · " + gust.at : "") + windowTxt };
+               val: "מקסימום " + Math.round(gust.max) + " קשר" + (gust.at ? " · " + gust.at : "") + windowTxt + gfsTxt };
       }
 
       // --- תנאי 3: הפרש טמפרטורות — כרגע רק מידע נלווה + קלט לבדיקת חום אזורי (c3b),
@@ -797,7 +835,7 @@ function initGo() {
                     "° · הפרש " + diff.toFixed(1) + "°" +
                     (mt ? " · מדידת " + mt : "") };
       } else if (pending) {
-        c3 = { state:"unk", title: c3.title, val:"ממתין למדידת 10:30 (מתעדכן ~10:45)" };
+        c3 = { state:"unk", title: c3.title, val:"ממתין למדידה בחלון 09:30–11:30" };
       }
 
       // --- הסיכוי המצרפי: מבוסס בעיקר על חוזק תחזית ה-WRF (c2), לא על הפרש הטמפ' —
@@ -816,7 +854,7 @@ function initGo() {
         ? { state: prob >= CFG.goProbMin ? "pass" : "warn", title:"סיכוי לגלישה",
             val: "סיכוי לשעתיים גלישה ~" + Math.round(prob) + "%" +
                  (prob < CFG.goProbMin ? " · מתחת לסף הירוק (" + CFG.goProbMin + "%)" : "") +
-                 (pending ? " · טרם כולל בדיקת חום אזורי (10:30)" : "") }
+                 (pending ? " · טרם כולל בדיקת חום אזורי (09:30–11:30)" : "") }
         : { state:"unk", title:"סיכוי לגלישה", val:"ממתין לתחזית ה-WRF" };
 
 // --- אינדיקטורים חיים (IMS) ---
@@ -870,7 +908,7 @@ function initGo() {
       const decisionChecks = c1Relevant ? [c1, c2] : [c2];
       const known = decisionChecks.every(c => c.state !== "unk");
       const goodAll = decisionChecks.every(c => c.state === "pass");
-      const pendingNote = pending ? " · טרם כולל בדיקת חום אזורי (10:30)" : "";
+      const pendingNote = pending ? " · טרם כולל בדיקת חום אזורי (09:30–11:30)" : "";
       if (!known) {
         setLight("is-no", "לא ניתן לקבוע", "חלק מהנתונים לא נטענו");
       } else if (goodAll) {
