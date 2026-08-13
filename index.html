@@ -476,6 +476,46 @@ function fmtH(dec) {
   const hh = Math.floor(dec), mm = Math.round((dec - hh) * 60);
   return (hh<10?"0"+hh:hh) + ":" + (mm<10?"0"+mm:mm);
 }
+// מקסימום גאסט + "רצף הרוח הרציף" האמיתי (משותף ל-initGo ול-initForecast).
+// היסטרזיס: כדי להתחיל רצף צריך לחצות thresholdKts, אבל אחרי שהוא התחיל הוא
+// נשאר "חי" כל עוד הגאסט לא יורד יותר מ-hystMarginKts קשר מתחת לסף — כך ירידה
+// רגעית (למשל 17.3 כש-הסף 18) לא שוברת רצף רוח אחד רציף בפועל.
+// lines: שורות CSV גולמיות (MMDD-HHMM,Wind,Dir,Gusts), בלי כותרת.
+function bestGustWindow(lines, todayPrefix, daylight, thresholdKts, hystMarginKts) {
+  const stepH = 0.5;
+  const continueKts = Math.max(0, thresholdKts - (hystMarginKts || 0));
+  let maxG = -Infinity, maxAt = "";
+  let best = null, cur = null;
+  const finalize = () => {
+    if (!cur) return;
+    const dur = cur.endH - cur.startH + stepH;
+    if (!best || dur > best.dur) best = { dur, startKey: cur.startKey };
+    cur = null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const c = lines[i].split(",");
+    const key = c[0] || "";
+    if (todayPrefix && !key.startsWith(todayPrefix)) continue;
+    const h = decHour(key);
+    if (h == null) continue;
+    if (daylight && (h < daylight.fromH || h > daylight.toH)) continue;
+    const g = parseFloat(c[3]);
+    if (isNaN(g)) continue;
+    if (g > maxG) { maxG = g; maxAt = key; }
+    if (cur) {
+      if (g >= continueKts) cur.endH = h;
+      else finalize();
+    }
+    if (!cur && g >= thresholdKts) cur = { startH: h, endH: h, startKey: key };
+  }
+  finalize();
+  return {
+    max: isFinite(maxG) ? maxG : null,
+    at: maxAt,
+    windowH: best ? best.dur : 0,
+    windowStart: best ? best.startKey : null
+  };
+}
 
 // קבצי ה-WRF (5 הליבה: דיאמונד/קרית ים/בצת/נחשולים/בית ינאי) נדחפים פעם ביום
 // ל-GitHub ע"י Apps Script (ר' github_daily_push.gs) — קריאה ישירה מ-raw.githubusercontent.com
@@ -571,20 +611,10 @@ function initGo() {
       if (!txt || txt.startsWith("Error")) return null;
       const lines = txt.trim().split(/\r?\n/);
       const today = todayMMDD();
-      let max = -Infinity, at = "";
-      // i=0: אין שורת כותרת בקובץ — כל שורה היא נתון אמיתי (MMDD-HHMM,Wind,Dir,Gusts)
-      for (let i = 0; i < lines.length; i++) {
-        const c = lines[i].split(",");
-        const key = c[0] || "";
-        if (!key.startsWith(today)) continue;      // רק היום — לא מחר/מחרתיים
-        if (daylight) {
-          const h = decHour(key);
-          if (h == null || h < daylight.fromH || h > daylight.toH) continue; // חושך
-        }
-        const g = parseFloat(c[3]);           // עמודה 4 = Gusts
-        if (!isNaN(g) && g > max) { max = g; at = key; }
-      }
-      return isFinite(max) ? { max, at } : null;
+      // אותה לוגיקת "רצף רציף" (עם היסטרזיס) שמוצגת בכרטיס תחזית הרוח —
+      // כדי שהרמזור יראה "מתי הרוח באמת מתחילה" ולא רק את שיא בודד
+      const r = bestGustWindow(lines, today, daylight, CFG.gustMinKts, 2);
+      return r.max != null ? r : null;
     }).catch(() => null);
   }
 
@@ -728,8 +758,11 @@ function initGo() {
       let c2 = { state:"unk", title:"גאסטים > " + CFG.gustMinKts + " קשר (WRF דיימונד)", val:"אין נתון" };
       if (gust) {
         const ok = gust.max > CFG.gustMinKts;
+        const windowTxt = gust.windowStart
+          ? " · רצף רציף מ-" + fmtH(decHour(gust.windowStart)) + " (" + gust.windowH + " שעות)"
+          : "";
         c2 = { state: ok ? "pass" : "fail", title: c2.title,
-               val: "מקסימום " + Math.round(gust.max) + " קשר" + (gust.at ? " · " + gust.at : "") };
+               val: "מקסימום " + Math.round(gust.max) + " קשר" + (gust.at ? " · " + gust.at : "") + windowTxt };
       }
 
       // --- תנאי 3: הפרש טמפרטורות — כרגע רק מידע נלווה + קלט לבדיקת חום אזורי (c3b),
@@ -892,34 +925,47 @@ function initForecast() {
 
   // daylight: {fromH, toH} — כשקיים, שעות מחוץ לטווח (חושך) לא נכנסות לחישוב
   // המקס' והחלון בכלל, כי אין טעם לדווח על רוח בשעה שאי אפשר לגלוש בה
+  // היסטרזיס: כדי להתחיל רצף צריך לחצות את WINDOW_KTS, אבל אחרי שהרצף כבר
+  // התחיל הוא נשאר "חי" כל עוד הגאסט לא יורד יותר מ-HYST_MARGIN קשר מתחת לסף —
+  // כך ירידה רגעית (למשל 17.3 כש-הסף 18) לא שוברת רצף רוח אחד רציף בפועל
+  const HYST_MARGIN = 2;
+
   function analyze(rows, cols, daylight) {
 	  const gcol = cols[3] || cols[1];
 	  const dcol = cols[2];
 	  let maxG = -Infinity, maxAt = "", dirAtMax = null;
-	  let run = 0, bestRun = 0, startAt = null, bestStart = null;
 	  const stepH = 0.5;
+	  const continueKts = Math.max(0, WINDOW_KTS - HYST_MARGIN);
 
+	  const pts = [];
 	  rows.forEach(r => {
 		const key = r[cols[0]];
-		if (daylight) {
-		  const h = decHour(key);
-		  if (h == null || h < daylight.fromH || h > daylight.toH) return; // חושך — לא רלוונטי
-		}
+		const h = decHour(key);
+		if (h == null) return; // שורה פגומה — לדלג
+		if (daylight && (h < daylight.fromH || h > daylight.toH)) return; // חושך — לא רלוונטי
 		const g = parseFloat(r[gcol]);
-		if (!isNaN(g)) {
-		  if (g > maxG) { maxG = g; at = r[cols[0]]; dirAtMax = dcol ? parseFloat(r[dcol]) : null; }
-		  if (g >= WINDOW_KTS) {
-			if (run === 0) startAt = r[cols[0]]; // תחילת רצף חדש
-			run += stepH;
-			if (run > bestRun) { bestRun = run; bestStart = startAt; }
-		  } else {
-			run = 0;
-			startAt = null;
-		  }
-		}
+		if (isNaN(g)) return;
+		if (g > maxG) { maxG = g; maxAt = key; dirAtMax = dcol ? parseFloat(r[dcol]) : null; }
+		pts.push({ key, h, g });
 	  });
 
-	  return { gust: isFinite(maxG) ? maxG : null, window: bestRun, dir: dirAtMax, start: bestStart };
+	  let best = null, cur = null;
+	  const finalize = () => {
+		if (!cur) return;
+		const dur = cur.endH - cur.startH + stepH; // כולל השורה האחרונה עצמה
+		if (!best || dur > best.dur) best = { dur, startKey: cur.startKey };
+		cur = null;
+	  };
+	  pts.forEach(p => {
+		if (cur) {
+		  if (p.g >= continueKts) cur.endH = p.h;
+		  else finalize();
+		}
+		if (!cur && p.g >= WINDOW_KTS) cur = { startH: p.h, endH: p.h, startKey: p.key };
+	  });
+	  finalize();
+
+	  return { gust: isFinite(maxG) ? maxG : null, window: best ? best.dur : 0, dir: dirAtMax, start: best ? best.startKey : null };
 	}
 
 
@@ -929,7 +975,9 @@ function initForecast() {
 		  .then(txt => {
 			if (!txt || txt.startsWith("Error")) return res(null);
 
-			const p = Papa.parse(txt, { header:true, skipEmptyLines:true });
+			// ⭐ אין שורת כותרת אמיתית בקבצים — header:true היה "אוכל" את השורה הראשונה
+			// של כל יום כאילו היא כותרת. מוסיפים כותרת מלאכותית כדי שכל השורות יישארו נתונים.
+			const p = Papa.parse("k,w,d,g\n" + txt, { header:true, skipEmptyLines:true });
 			const rows = p.data, cols = p.meta.fields || [];
 			if (!rows.length || !cols.length) return res(null);
 
@@ -1410,7 +1458,8 @@ function initStations() {
 		  .then(csvText => {
 			if (csvText.startsWith("Error")) return res(null);
 
-			Papa.parse(csvText, {
+			// ⭐ אין שורת כותרת אמיתית בקבצים — אותה בעיה כמו ב-initForecast, אותו תיקון
+			Papa.parse("k,w,d,g\n" + csvText, {
 			  header: true,
 			  skipEmptyLines: true,
 			  complete: (r) => {
