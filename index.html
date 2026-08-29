@@ -1226,8 +1226,11 @@ function initLive() {
 
   const $ = (id) => document.getElementById(id);
   const map = L.map($("w-map"), { scrollWheelZoom:false, keyboard:false });
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-    { maxZoom:18, attribution:"© OpenStreetMap · CARTO" }).addTo(map);
+  // ⭐ CARTO דורש עכשיו API key גם לשימוש חינמי (עד 5M בקשות/חודש) — הוחלף ב-Esri
+  // World Light Gray Canvas: חינמי לגמרי, בלי מפתח, ואותה אסתטיקה בהירה/מינימליסטית.
+  // שים לב לסדר {z}/{y}/{x} (הפוך מרוב שרתי הטיילים, כולל CARTO/OSM)
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom:16, attribution:"© Esri" }).addTo(map);
   // ברירת מחדל: מרוכז על הליבה (כנרת + נתיב הרוח מהחוף) — שאר התחנות בארץ
   // עדיין מצוירות על המפה, המשתמש יכול לגלול/להתרחק כדי לראות אותן
   const coreStations = STATIONS.filter(s => s.core);
