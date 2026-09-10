@@ -12,6 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
 <div id="dmd" dir="rtl">
+  <div id="stale-wrf-banner" class="stale-wrf-banner">⚠️ קובץ התחזית (WRF) לא מכיל נתונים של היום — ייתכן שהתחזית לא התעדכנה</div>
   <section class="dmd-block pad"><div id="go" dir="rtl">
   <div class="go-spot">🪁 גלישת קייט · דיימונד כנרת</div>
   <div class="go-light" id="go-light">
@@ -84,6 +85,13 @@
   #dmd .dmd-block.pad{ padding:0; }
   @media (max-width:640px){
     #dmd .dmd-block{ margin-bottom:14px; }
+  }
+
+  /* ===== באנר: קובץ WRF בלי נתוני היום ===== */
+  #dmd .stale-wrf-banner{
+    display:none; max-width:900px; margin:0 auto 14px; padding:12px 16px;
+    border-radius:10px; background:#fdeade; border:1px solid #f0a95c;
+    color:#7a3d05; font-size:14px; font-weight:700; text-align:center;
   }
 
   /* ===== רמזור ===== */
@@ -476,6 +484,13 @@ function fmtH(dec) {
   const hh = Math.floor(dec), mm = Math.round((dec - hh) * 60);
   return (hh<10?"0"+hh:hh) + ":" + (mm<10?"0"+mm:mm);
 }
+// תאריך היום בפורמט MMDD לפי שעון ישראל — כמו שה-WRF כותב בעמודת הזמן (0810-1800 וכו')
+// (משותפת — קודם הייתה מוגדרת בתוך initGo בלבד, עכשיו גם checkWrfFreshness משתמשת בה)
+function todayMMDD() {
+  const d = new Date();
+  return d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", month:"2-digit" }) +
+         d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", day:"2-digit" });
+}
 // מקסימום גאסט + "רצף הרוח הרציף" האמיתי (משותף ל-initGo ול-initForecast).
 // היסטרזיס: כדי להתחיל רצף צריך לחצות thresholdKts, אבל אחרי שהוא התחיל הוא
 // נשאר "חי" כל עוד הגאסט לא יורד יותר מ-hystMarginKts קשר מתחת לסף — כך ירידה
@@ -526,6 +541,21 @@ function fetchCsvSmart(filename, appsScriptUrl) {
   return fetch(GITHUB_RAW_BASE + encodeURIComponent(filename) + "?_=" + Date.now())
     .then(r => { if (!r.ok) throw new Error("github " + r.status); return r.text(); })
     .catch(() => fetch(appsScriptUrl + "?name=" + encodeURIComponent(filename) + "&_=" + Date.now()).then(r => r.text()));
+}
+
+// בודק אם קובץ ה-WRF הראשי (דיאמונד) בכלל מכיל שורות של היום — אם לא, כנראה
+// שהתחזית לא התעדכנה (תקלת פייפליין חיצוני/Drive), ומציג באנר התראה בראש הדף.
+// בכוונה "שקט" במקרה של כשל רשת/שגיאה — עדיף לא להציג באנר שגוי מאשר לפספס תקלה אמיתית.
+function checkWrfFreshness() {
+  const GUST_FILE = "18z_1km_Kineret_Diamond.csv";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwK_3bU5fB45MBORRWAiv-p29-9QJmn2_LsBXGZG0NmlQrTUIML8fCU99oIfhS-ynHP4w/exec";
+  fetchCsvSmart(GUST_FILE, APPS_SCRIPT_URL).then(txt => {
+    if (!txt || txt.startsWith("Error")) return; // אין מספיק מידע כדי לקבוע — לא מנחשים
+    const today = todayMMDD();
+    const hasToday = txt.trim().split(/\r?\n/).some(line => line.startsWith(today));
+    const banner = document.getElementById("stale-wrf-banner");
+    if (banner) banner.style.display = hasToday ? "none" : "block";
+  }).catch(() => {});
 }
 
 function initGo() {
@@ -597,13 +627,6 @@ function initGo() {
       "&longitude=" + pt.lon + "&current=" + params +
       "&wind_speed_unit=kn&timezone=auto";
     return fetch(url).then(r => r.json());
-  }
-
-  // תאריך היום בפורמט MMDD לפי שעון ישראל — כמו שה-WRF כותב בעמודת הזמן (0810-1800 וכו')
-  function todayMMDD() {
-    const d = new Date();
-    return d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", month:"2-digit" }) +
-           d.toLocaleDateString("he-IL", { timeZone:"Asia/Jerusalem", day:"2-digit" });
   }
 
   // גאסט מקסימלי בקובץ ה-WRF של דיאמונד, מוגבל ליום הנוכחי ולשעות אור יום בלבד.
@@ -1677,7 +1700,7 @@ function initStations() {
 
 // ===== אתחול כל הרכיבים (כולם גלויים, אחד מתחת לשני) =====
 (function () {
-  [initGo, initForecast, initLive, initStations].forEach(function (fn) {
+  [checkWrfFreshness, initGo, initForecast, initLive, initStations].forEach(function (fn) {
     try { fn(); } catch (e) { console.error(e); }
   });
   // תיקון גודל מפות אחרי הרינדור
