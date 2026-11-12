@@ -12,7 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
 <div id="dmd" dir="rtl">
-  <div id="stale-wrf-banner" class="stale-wrf-banner">⚠️ קובץ התחזית (WRF) לא מכיל נתונים של היום — ייתכן שהתחזית לא התעדכנה</div>
+  <div id="stale-wrf-banner" class="stale-wrf-banner">⚠️ קובץ התחזית (WRF) לא מכיל נתונים של היום — הרמזור, תחזית הרוח ותחנות ה-WRF הוסתרו זמנית. ניתן להיעזר בווידג'ט Windguru וברוח החיה למטה.</div>
   <section class="dmd-block pad"><div id="go" dir="rtl">
   <div class="go-spot">🪁 גלישת קייט · דיימונד כנרת</div>
   <div class="go-light" id="go-light">
@@ -36,6 +36,10 @@
   <div class="fc-grid" id="fc-grid"></div>
   <div class="fc-foot" id="fc-foot">טוען…</div>
 </div></section>
+  <section class="dmd-block"><div id="wg-widget-box" dir="ltr" style="background:#fff;border:1px solid #e3e9ef;border-radius:16px;padding:10px;overflow-x:auto">
+    <div style="font-weight:700;color:#5b7186;font-size:14px;text-align:center;margin-bottom:6px" dir="rtl">Windguru — דיימונד (WRF 1km)</div>
+    <div id="wg_fwdg_991042_923_1794476970516"></div>
+  </div></section>
   <section class="dmd-block"><div id="wrf">
   <div class="wrf-head">
     <div class="wrf-title">openWRF <span class="wrf-sep">/</span> wind stations</div>
@@ -555,7 +559,27 @@ function checkWrfFreshness() {
     const hasToday = txt.trim().split(/\r?\n/).some(line => line.startsWith(today));
     const banner = document.getElementById("stale-wrf-banner");
     if (banner) banner.style.display = hasToday ? "none" : "block";
+    // כשה-WRF לא עדכני — מסתירים את הרכיבים שתלויים בו (רמזור, תחזית רוח, תחנות WRF).
+    // נשארים: ווידג'ט Windguru והרוח החיה (IMS), שלא תלויים בקבצי ה-WRF.
+    ["go", "fc", "wrf"].forEach(id => {
+      const el = document.getElementById(id);
+      const sec = el && el.closest("section");
+      if (sec) sec.style.display = hasToday ? "" : "none";
+    });
   }).catch(() => {});
+}
+
+// ווידג'ט רשמי של Windguru (הצגה בלבד — אין גישה לנתונים מהקוד). ספוט 991042.
+// אם המודל המוצג לא WRF 1km: ב-windguru.cz בחר Forecast widgets → ספוט 991042 → מודל WRF 1km,
+// והעתק את הערך של "m=" מהקוד שנוצר לתוך המערך למטה (הוסף "m=<מספר>").
+function initWindguruWidget() {
+  const uid = "wg_fwdg_991042_923_1794476970516";
+  const args = ["s=991042", "m=923", "uid=" + uid, "wj=knots", "tj=c", "waj=m", "tij=cm",
+    "odh=0", "doh=24", "fhours=240", "hrsm=2", "vt=forecasts", "lng=en",
+    "p=WINDSPD,GUST,MWINDSPD,SMER,TMPE,FLHGT,CDC,APCP1s,RATING"];
+  const s = document.createElement("script");
+  s.src = "https://www.windguru.cz/js/widget.php?" + args.join("&");
+  document.body.appendChild(s);
 }
 
 function initGo() {
@@ -1700,7 +1724,7 @@ function initStations() {
 
 // ===== אתחול כל הרכיבים (כולם גלויים, אחד מתחת לשני) =====
 (function () {
-  [checkWrfFreshness, initGo, initForecast, initLive, initStations].forEach(function (fn) {
+  [checkWrfFreshness, initWindguruWidget, initGo, initForecast, initLive, initStations].forEach(function (fn) {
     try { fn(); } catch (e) { console.error(e); }
   });
   // תיקון גודל מפות אחרי הרינדור
